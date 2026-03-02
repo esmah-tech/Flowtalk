@@ -1,33 +1,17 @@
-import { ChevronDown, Search, Sparkles, FileText, Bookmark, Inbox, Hash, Plus, ChevronRight, X } from 'lucide-react';
-import React, { useState } from 'react';
+import { ChevronDown, ChevronRight, Search, Hash, Plus, X, Inbox, BellOff } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { supabase } from '@/lib/supabase';
 
-type SubChannel = { id: string; name: string; badge?: number };
-type Channel = {
+type DbChannel = {
   id: string;
   name: string;
-  badge?: number;
-  active: boolean;
-  children?: SubChannel[];
+  type: string;
+  category: string | null;
+  is_active: boolean | null;
 };
 
-const ALL_CHANNELS: Channel[] = [
-  { id: 'general',       name: 'general',       badge: 1, active: true },
-  { id: 'frontend',      name: 'frontend',       active: true },
-  { id: 'v3.0',          name: 'v3.0',           active: true, children: [
-    { id: 'wireframe',   name: 'Wireframe' },
-    { id: 'design-sub',  name: 'Design' },
-  ]},
-  { id: 'design',        name: 'design',         active: false },
-  { id: 'announcements', name: 'announcements',  active: false },
-];
-
-const ACME_CHANNELS = [
-  { id: 'acme-website', name: 'website-redesign' },
-  { id: 'acme-brand',   name: 'brand-assets' },
-];
-
 const DM_MEMBERS = [
-  { id: 'daniel', name: 'Daniel A.', online: true,  gradient: 'from-blue-400 to-cyan-400' },
+  { id: 'daniel', name: 'Daniel A.', online: true,  gradient: 'from-[#4d298c] to-purple-400' },
   { id: 'emily',  name: 'Emily D.',  online: false, gradient: 'from-purple-400 to-pink-400' },
 ];
 
@@ -35,61 +19,158 @@ interface SidebarProps {
   selectedDMId: string | null;
   onSelectDM: (id: string) => void;
   onClearDM: () => void;
+  selectedChannelId: string | null;
+  onSelectChannel: (id: string) => void;
+  reloadTrigger: number;
+  mutedChannelIds: Set<string>;
 }
 
-export function Sidebar({ selectedDMId, onSelectDM, onClearDM }: SidebarProps) {
-  const [expandedSections, setExpandedSections] = useState({
-    favorites: true,
-    channels: true,
-    directMessages: true,
-    clientAcme: false,
-    inactive: false,
-  });
+// ─── Create Channel Modal ─────────────────────────────────────────────────────
 
-  const [selectedChannelId, setSelectedChannelId] = useState<string | null>('frontend');
-  const [activeNavItem, setActiveNavItem] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [isSearchOpen, setIsSearchOpen] = useState(false);
+interface CreateChannelModalProps {
+  initialCategory: string;
+  onClose: () => void;
+  onCreated: () => void;
+}
 
-  const toggleSection = (section: keyof typeof expandedSections) => {
-    setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
+function CreateChannelModal({ initialCategory, onClose, onCreated }: CreateChannelModalProps) {
+  const [name, setName] = useState('');
+  const [category, setCategory] = useState(initialCategory);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSave = async () => {
+    const trimmedName = name.trim();
+    if (!trimmedName) { setError('Channel name is required.'); return; }
+    setSaving(true);
+    const { error: dbError } = await supabase.from('channels').insert({
+      name: trimmedName,
+      category: category.trim() || 'General',
+      is_active: true,
+      type: 'channel',
+    });
+    setSaving(false);
+    if (dbError) { setError(dbError.message); return; }
+    onCreated();
+    onClose();
   };
 
+  return (
+    <div
+      className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-xl shadow-xl w-80 p-6"
+        onClick={e => e.stopPropagation()}
+      >
+        <h2 className="text-[16px] font-bold text-gray-900 mb-4">New Channel</h2>
+        <div className="space-y-4">
+          <div>
+            <label className="text-[12px] font-medium text-gray-700 block mb-1">Channel name</label>
+            <input
+              autoFocus
+              value={name}
+              onChange={e => { setName(e.target.value); setError(''); }}
+              onKeyDown={e => e.key === 'Enter' && handleSave()}
+              placeholder="e.g. design-feedback"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-[14px] outline-none focus:border-[#4d298c] focus:ring-2 focus:ring-[#ede8f7]"
+            />
+          </div>
+          <div>
+            <label className="text-[12px] font-medium text-gray-700 block mb-1">Category</label>
+            <input
+              value={category}
+              onChange={e => setCategory(e.target.value)}
+              placeholder="e.g. General"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-[14px] outline-none focus:border-[#4d298c] focus:ring-2 focus:ring-[#ede8f7]"
+            />
+          </div>
+          {error && <p className="text-[12px] text-red-500">{error}</p>}
+        </div>
+        <div className="flex gap-2 mt-5">
+          <button
+            onClick={onClose}
+            className="flex-1 py-2.5 rounded-lg text-[13px] font-semibold text-gray-700 border border-gray-300 hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="flex-1 py-2.5 bg-[#4d298c] text-white rounded-lg font-semibold text-[13px] hover:bg-[#3d1f70] disabled:opacity-50"
+          >
+            {saving ? 'Creating…' : 'Create'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Sidebar ──────────────────────────────────────────────────────────────────
+
+export function Sidebar({
+  selectedDMId, onSelectDM, onClearDM, selectedChannelId, onSelectChannel,
+  reloadTrigger, mutedChannelIds,
+}: SidebarProps) {
+  const [channels, setChannels] = useState<DbChannel[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [dmExpanded, setDmExpanded] = useState(true);
+  const [inactiveExpanded, setInactiveExpanded] = useState(false);
+  // category name → expanded (default true)
+  const [expandedCats, setExpandedCats] = useState<Record<string, boolean>>({});
+  const [createModal, setCreateModal] = useState<{ open: boolean; category: string }>({ open: false, category: '' });
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [activeNavItem, setActiveNavItem] = useState<string | null>(null);
+
+  const loadChannels = useCallback(async () => {
+    const { data } = await supabase
+      .from('channels')
+      .select('id, name, type, category, is_active')
+      .order('name');
+    setChannels(data ?? []);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { loadChannels(); }, [loadChannels, reloadTrigger]);
+
+  const isCatExpanded = (cat: string) => expandedCats[cat] ?? true;
+  const toggleCat = (cat: string) =>
+    setExpandedCats(prev => ({ ...prev, [cat]: !isCatExpanded(cat) }));
+
   const handleSelectChannel = (id: string) => {
-    setSelectedChannelId(id);
+    onSelectChannel(id);
     setActiveNavItem(null);
     onClearDM();
   };
 
   const handleSelectDM = (id: string) => {
-    setSelectedChannelId(null);
+    onSelectChannel('');
     onSelectDM(id);
   };
 
-  // A channel item is active only when no DM is open
   const isSelected = (id: string) => selectedChannelId === id && selectedDMId === null;
 
   const q = searchQuery.toLowerCase();
 
-  function channelMatchesQuery(c: Channel): boolean {
-    return (
-      c.name.toLowerCase().includes(q) ||
-      (c.children ?? []).some(s => s.name.toLowerCase().includes(q))
-    );
-  }
+  // Partition active vs inactive (treat null as active)
+  const activeChannels  = channels.filter(c => c.is_active !== false);
+  const inactiveChannels = channels.filter(c => c.is_active === false);
 
-  const activeChannels = ALL_CHANNELS.filter(c => c.active && (q === '' || channelMatchesQuery(c)));
-  const inactiveChannels = ALL_CHANNELS.filter(c => !c.active);
-  const filteredAcme = ACME_CHANNELS.filter(c => q === '' || c.name.toLowerCase().includes(q));
+  // Group active channels by category
+  const categoryMap = new Map<string, DbChannel[]>();
+  activeChannels.forEach(c => {
+    const cat = c.category ?? 'General';
+    if (!categoryMap.has(cat)) categoryMap.set(cat, []);
+    categoryMap.get(cat)!.push(c);
+  });
+
   const filteredDMs = DM_MEMBERS.filter(m => q === '' || m.name.toLowerCase().includes(q));
 
-  const closeSearch = () => {
-    setIsSearchOpen(false);
-    setSearchQuery('');
-  };
-
-  const selectedItemClass = 'bg-purple-50 text-[#4d298c]';
-  const defaultItemClass = 'hover:bg-gray-100 text-gray-700';
+  const sel = 'bg-purple-50 text-[#4d298c]';
+  const def = 'hover:bg-gray-100 text-gray-700';
 
   return (
     <div className="w-60 min-h-0 bg-[#f8f9fa] border-r border-gray-200 flex flex-col">
@@ -113,7 +194,7 @@ export function Sidebar({ selectedDMId, onSelectDM, onClearDM }: SidebarProps) {
               placeholder="Search channels & members..."
               className="flex-1 bg-transparent text-[13px] text-gray-700 placeholder-gray-400 outline-none border-none min-w-0"
             />
-            <button onClick={closeSearch} className="text-gray-400 hover:text-gray-600 shrink-0">
+            <button onClick={() => { setIsSearchOpen(false); setSearchQuery(''); }} className="text-gray-400 hover:text-gray-600 shrink-0">
               <X size={14} />
             </button>
           </div>
@@ -128,226 +209,194 @@ export function Sidebar({ selectedDMId, onSelectDM, onClearDM }: SidebarProps) {
         )}
       </div>
 
-      {/* Navigation Items */}
+      {/* Inbox nav item */}
+      <div className="px-2 pb-1">
+        <button
+          onClick={() => { setActiveNavItem('inbox'); onSelectChannel(''); onClearDM(); }}
+          className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-[13px] ${activeNavItem === 'inbox' ? sel : def}`}
+        >
+          <Inbox size={16} className="text-gray-500 shrink-0" />
+          <span>Inbox</span>
+          <span className="ml-auto w-5 h-5 rounded-full bg-[#4d298c] text-white text-[10px] flex items-center justify-center font-semibold shrink-0">
+            1
+          </span>
+        </button>
+      </div>
+
+      {/* Scrollable list */}
       <div className="flex-1 overflow-y-auto">
-        <div className="py-1 px-2 space-y-0.5">
-          {[
-            { id: 'assistant',  icon: <Sparkles size={16} className="text-purple-500" />, label: 'Assistant', badge: <span className="ml-auto text-[10px] bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded font-medium">NEW</span> },
-            { id: 'drafts',     icon: <FileText size={16} className="text-gray-500" />,   label: 'Drafts' },
-            { id: 'saved',      icon: <Bookmark size={16} className="text-gray-500" />,   label: 'Saved items' },
-            { id: 'inbox',      icon: <Inbox    size={16} className="text-gray-500" />,   label: 'Inbox', badge: <span className="ml-auto text-[11px] px-1.5 py-0.5 rounded font-medium text-white" style={{ backgroundColor: '#4d298c' }}>1</span> },
-          ].map(({ id, icon, label, badge }) => (
+
+        {/* ── Channels section ───────────────────────────────────── */}
+        <div className="mt-2">
+          {/* Section header */}
+          <div className="flex items-center justify-between px-3 py-1">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Channels</span>
             <button
-              key={id}
-              onClick={() => { setActiveNavItem(id); setSelectedChannelId(null); onClearDM(); }}
-              className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-[13px] ${
-                activeNavItem === id ? selectedItemClass : defaultItemClass
-              }`}
+              onClick={() => setCreateModal({ open: true, category: '' })}
+              className="p-0.5 hover:bg-gray-200 rounded"
+              title="New channel"
             >
-              {icon}
-              <span>{label}</span>
-              {badge}
+              <Plus size={14} className="text-gray-500" />
             </button>
-          ))}
-        </div>
-
-        {/* Favorites */}
-        <div className="mt-4">
-          <button
-            onClick={() => toggleSection('favorites')}
-            className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-gray-100 text-[13px] font-semibold text-gray-700"
-          >
-            <span>Favorites</span>
-            {expandedSections.favorites ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-          </button>
-          {expandedSections.favorites && (
-            <div className="py-1 px-2 space-y-0.5">
-              <button
-                onClick={() => handleSelectChannel('fav-sophia')}
-                className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-[13px] ${isSelected('fav-sophia') ? selectedItemClass : defaultItemClass}`}
-              >
-                <div className="w-5 h-5 rounded bg-gradient-to-br from-pink-400 to-orange-400 shrink-0" />
-                <span>Sophia Wilson</span>
-                <span className="ml-auto text-[11px] bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded font-medium">2</span>
-              </button>
-              <button
-                onClick={() => handleSelectChannel('frontend')}
-                className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-[13px] ${isSelected('frontend') ? selectedItemClass : defaultItemClass}`}
-              >
-                <Hash size={14} className={isSelected('frontend') ? 'text-[#4d298c]' : 'text-gray-500'} />
-                <span>Front-end</span>
-                <span className="ml-auto text-[11px] bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded font-medium">4</span>
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* Channels */}
-        <div className="mt-4">
-          {/* Section header — div so Plus button can be a nested button */}
-          <div
-            onClick={() => toggleSection('channels')}
-            className="flex items-center justify-between px-3 py-1.5 hover:bg-gray-100 text-[13px] font-semibold text-gray-700 cursor-pointer"
-          >
-            <span>Channels</span>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={(e) => { e.stopPropagation(); console.log('create channel'); }}
-                className="p-0.5 hover:bg-gray-200 rounded"
-              >
-                <Plus size={14} />
-              </button>
-              {expandedSections.channels ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-            </div>
           </div>
 
-          {expandedSections.channels && (
-            <div className="py-1 px-2 space-y-0.5">
-              {activeChannels.map(channel => {
-                const matchingChildren = q === ''
-                  ? channel.children
-                  : channel.children?.filter(s => s.name.toLowerCase().includes(q));
-                const sel = isSelected(channel.id);
+          {loading && (
+            <p className="px-5 py-1.5 text-[12px] text-gray-400">Loading…</p>
+          )}
 
-                return (
-                  <div key={channel.id}>
-                    <button
-                      onClick={() => handleSelectChannel(channel.id)}
-                      className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-[13px] ${sel ? selectedItemClass : defaultItemClass}`}
-                    >
-                      <Hash size={14} className={sel ? 'text-[#4d298c]' : 'text-gray-500'} />
-                      <span className={sel ? 'font-medium' : ''}>{channel.name}</span>
-                      {channel.badge !== undefined && (
-                        <span className="ml-auto text-[11px] bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded font-medium">
-                          {channel.badge}
-                        </span>
-                      )}
-                    </button>
-                    {matchingChildren?.map(sub => {
-                      const subSel = isSelected(sub.id);
+          {!loading && Array.from(categoryMap.entries()).map(([cat, catChannels]) => {
+            const expanded = isCatExpanded(cat);
+            const filtered = q === '' ? catChannels : catChannels.filter(c => c.name.toLowerCase().includes(q));
+            if (q !== '' && filtered.length === 0) return null;
+
+            return (
+              <div key={cat}>
+                {/* Category row */}
+                <div className="flex items-center px-2 py-0.5 group">
+                  <button
+                    onClick={() => toggleCat(cat)}
+                    className="flex items-center gap-1 flex-1 min-w-0 hover:bg-gray-100 rounded px-1 py-1 text-left"
+                  >
+                    {expanded
+                      ? <ChevronDown size={12} className="text-gray-400 shrink-0" />
+                      : <ChevronRight size={12} className="text-gray-400 shrink-0" />
+                    }
+                    <span className="text-[12px] font-semibold text-gray-600 truncate">{cat}</span>
+                  </button>
+                  <button
+                    onClick={() => setCreateModal({ open: true, category: cat })}
+                    className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-gray-200 rounded shrink-0 ml-1"
+                    title={`New channel in ${cat}`}
+                  >
+                    <Plus size={12} className="text-gray-500" />
+                  </button>
+                </div>
+
+                {/* Channels under this category */}
+                {expanded && (
+                  <div className="space-y-0.5 px-2 pb-0.5">
+                    {(q === '' ? catChannels : filtered).map(channel => {
+                      const active = isSelected(channel.id);
                       return (
                         <button
-                          key={sub.id}
-                          onClick={() => handleSelectChannel(sub.id)}
-                          className={`w-full flex items-center gap-1.5 py-1 rounded text-[12px] pl-8 pr-2 ${subSel ? selectedItemClass : 'hover:bg-gray-100 text-gray-500'}`}
+                          key={channel.id}
+                          onClick={() => handleSelectChannel(channel.id)}
+                          className={`w-full flex items-center gap-2 pl-5 pr-2 py-1.5 rounded text-[13px] text-left ${active ? sel : def}`}
                         >
-                          <span className={subSel ? 'text-[#4d298c]' : 'text-gray-400'}>↳</span>
-                          <Hash size={12} className={subSel ? 'text-[#4d298c]' : 'text-gray-400'} />
-                          <span>{sub.name}</span>
+                          <Hash size={13} className={active ? 'text-[#4d298c] shrink-0' : 'text-gray-400 shrink-0'} />
+                          <span className={`truncate flex-1 ${active ? 'font-medium' : ''}`}>{channel.name}</span>
+                          {mutedChannelIds.has(channel.id) && (
+                            <BellOff size={11} className="text-gray-400 shrink-0" />
+                          )}
                         </button>
                       );
                     })}
                   </div>
-                );
-              })}
+                )}
+              </div>
+            );
+          })}
 
-              {/* Inactive sub-section */}
-              {inactiveChannels.length > 0 && q === '' && (
-                <>
-                  <button
-                    onClick={() => toggleSection('inactive')}
-                    className="w-full flex items-center gap-1.5 px-2 py-1 text-[11px] font-semibold text-gray-400 hover:text-gray-600 mt-1"
-                  >
-                    {expandedSections.inactive ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                    <span>Inactive</span>
-                    <span className="ml-auto">{inactiveChannels.length}</span>
-                  </button>
-                  {expandedSections.inactive && inactiveChannels.map(c => {
-                    const sel = isSelected(c.id);
+          {!loading && categoryMap.size === 0 && q === '' && (
+            <p className="px-5 py-1.5 text-[12px] text-gray-400">No channels yet.</p>
+          )}
+        </div>
+
+        {/* ── Inactive section ───────────────────────────────────── */}
+        <div className="mt-3">
+          <button
+            onClick={() => setInactiveExpanded(v => !v)}
+            className="w-full flex items-center gap-1 px-3 py-1 hover:bg-gray-100"
+          >
+            {inactiveExpanded
+              ? <ChevronDown size={11} className="text-gray-400 shrink-0" />
+              : <ChevronRight size={11} className="text-gray-400 shrink-0" />
+            }
+            <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#9CA3AF' }}>
+              Inactive · AI
+            </span>
+          </button>
+          {inactiveExpanded && (
+            <div className="pb-1">
+              {inactiveChannels.length === 0 ? (
+                <p className="pl-6 pr-2 py-1 text-[11px] text-gray-400">No inactive channels</p>
+              ) : (
+                <div className="space-y-0.5 px-2 opacity-50">
+                  {inactiveChannels.map(channel => {
+                    const active = isSelected(channel.id);
                     return (
                       <button
-                        key={c.id}
-                        onClick={() => handleSelectChannel(c.id)}
-                        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-[12px] ${sel ? selectedItemClass : 'hover:bg-gray-100 text-gray-400 opacity-60'}`}
+                        key={channel.id}
+                        onClick={() => handleSelectChannel(channel.id)}
+                        className={`w-full flex items-center gap-2 pl-5 pr-2 py-1.5 rounded text-[13px] text-left ${active ? sel : def}`}
                       >
-                        <Hash size={12} className={sel ? 'text-[#4d298c]' : 'text-gray-400'} />
-                        <span>{c.name}</span>
+                        <Hash size={13} className="text-gray-400 shrink-0" />
+                        <span className="truncate">{channel.name}</span>
                       </button>
                     );
                   })}
-                </>
+                </div>
               )}
             </div>
           )}
         </div>
 
-        {/* Client: Acme */}
-        {(q === '' || filteredAcme.length > 0) && (
-          <div className="mt-4">
-            <div
-              onClick={() => toggleSection('clientAcme')}
-              className="flex items-center justify-between px-3 py-1.5 hover:bg-gray-100 text-[13px] font-semibold text-gray-700 cursor-pointer"
-            >
-              <span>Client: Acme</span>
-              <div className="flex items-center gap-1">
-                <button
-                  onClick={(e) => { e.stopPropagation(); console.log('create channel'); }}
-                  className="p-0.5 hover:bg-gray-200 rounded"
-                >
-                  <Plus size={14} />
-                </button>
-                {expandedSections.clientAcme ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-              </div>
-            </div>
-            {expandedSections.clientAcme && (
-              <div className="py-1 px-2 space-y-0.5">
-                {filteredAcme.map(c => {
-                  const sel = isSelected(c.id);
-                  return (
-                    <button
-                      key={c.id}
-                      onClick={() => handleSelectChannel(c.id)}
-                      className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-[13px] ${sel ? selectedItemClass : defaultItemClass}`}
-                    >
-                      <Hash size={14} className={sel ? 'text-[#4d298c]' : 'text-gray-500'} />
-                      <span>{c.name}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Direct Messages */}
-        <div className="mt-4">
+        {/* ── Direct Messages section ────────────────────────────── */}
+        <div className="mt-4 mb-2">
           <div
-            onClick={() => toggleSection('directMessages')}
-            className="flex items-center justify-between px-3 py-1.5 hover:bg-gray-100 text-[13px] font-semibold text-gray-700 cursor-pointer"
+            onClick={() => setDmExpanded(v => !v)}
+            className="flex items-center justify-between px-3 py-1 hover:bg-gray-100 cursor-pointer"
           >
-            <span>Direct messages</span>
             <div className="flex items-center gap-1">
-              <button
-                onClick={(e) => { e.stopPropagation(); console.log('create channel'); }}
-                className="p-0.5 hover:bg-gray-200 rounded"
-              >
-                <Plus size={14} />
-              </button>
-              {expandedSections.directMessages ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+              {dmExpanded
+                ? <ChevronDown size={12} className="text-gray-400 shrink-0" />
+                : <ChevronRight size={12} className="text-gray-400 shrink-0" />
+              }
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                Direct messages
+              </span>
             </div>
+            <button
+              onClick={e => e.stopPropagation()}
+              className="p-0.5 hover:bg-gray-200 rounded"
+              title="New DM"
+            >
+              <Plus size={13} className="text-gray-500" />
+            </button>
           </div>
-          {expandedSections.directMessages && (
-            <div className="py-1 px-2 space-y-0.5">
+
+          {dmExpanded && (
+            <div className="space-y-0.5 px-2 pb-1">
               {filteredDMs.map(member => (
                 <button
                   key={member.id}
                   onClick={() => handleSelectDM(member.id)}
-                  className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-[13px] ${
-                    member.id === selectedDMId ? selectedItemClass : defaultItemClass
+                  className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-[13px] text-left ${
+                    member.id === selectedDMId ? sel : def
                   }`}
                 >
-                  <div className={`w-5 h-5 rounded bg-gradient-to-br ${member.gradient} relative shrink-0`}>
+                  <div className={`w-5 h-5 rounded-full bg-gradient-to-br ${member.gradient} relative shrink-0`}>
                     {member.online && (
-                      <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-[#f8f9fa]" />
+                      <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 bg-green-500 rounded-full border border-[#f8f9fa]" />
                     )}
                   </div>
-                  <span>{member.name}</span>
+                  <span className="truncate">{member.name}</span>
                 </button>
               ))}
             </div>
           )}
         </div>
+
       </div>
+
+      {/* Create Channel Modal */}
+      {createModal.open && (
+        <CreateChannelModal
+          initialCategory={createModal.category}
+          onClose={() => setCreateModal({ open: false, category: '' })}
+          onCreated={loadChannels}
+        />
+      )}
     </div>
   );
 }

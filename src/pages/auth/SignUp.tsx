@@ -1,4 +1,4 @@
-import { Link } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 import { AuthLayout } from './AuthLayout';
 import { FlowTalkLogo } from '@/app/components/FlowTalkLogo';
 import { authInputClass, authInputStyle, authButtonClass, authButtonStyle, authGoogleButtonClass, authGoogleButtonStyle } from './authStyles';
@@ -8,6 +8,7 @@ import { Input } from '@/app/components/ui/input';
 import { Button } from '@/app/components/ui/button';
 import { Checkbox } from '@/app/components/ui/checkbox';
 import React, { useState } from 'react';
+import { supabase } from '@/lib/supabase';
 
 function GoogleIcon() {
   return (
@@ -21,16 +22,18 @@ function GoogleIcon() {
 }
 
 export default function SignUp() {
+  const navigate = useNavigate();
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [agreeTerms, setAgreeTerms] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(false);
 
   const strength = getPasswordStrength(password);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const next: Record<string, string> = {};
     if (!fullName.trim()) next.fullName = 'Full name is required';
@@ -40,8 +43,20 @@ export default function SignUp() {
     if (password !== confirmPassword) next.confirmPassword = 'Passwords do not match';
     if (!agreeTerms) next.terms = 'You must agree to the Terms of Service and Privacy Policy';
     setErrors(next);
-    if (Object.keys(next).length === 0) {
-      // Would sign up here
+    if (Object.keys(next).length > 0) return;
+
+    setLoading(true);
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { data: { full_name: fullName } },
+    });
+    setLoading(false);
+
+    if (error) {
+      setErrors({ email: error.message });
+    } else {
+      navigate('/signin');
     }
   };
 
@@ -139,8 +154,8 @@ export default function SignUp() {
         </label>
         {errors.terms && <p className="text-sm" style={{ color: '#DC2626' }}>{errors.terms}</p>}
 
-        <Button type="submit" className={authButtonClass} style={authButtonStyle}>
-          Sign Up
+        <Button type="submit" disabled={loading} className={authButtonClass} style={authButtonStyle}>
+          {loading ? 'Creating account…' : 'Sign Up'}
         </Button>
       </form>
 

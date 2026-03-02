@@ -18,7 +18,7 @@ export type DMProfile = {
 const DM_PROFILES: DMProfile[] = [
   {
     id: 'daniel', name: 'Daniel A.', fullName: 'Daniel Anderson',
-    role: 'Frontend Dev', online: true, gradient: 'from-blue-400 to-cyan-400',
+    role: 'Frontend Dev', online: true, gradient: 'from-[#4d298c] to-purple-400',
     sharedFiles: 7,
     messages: [
       { from: 'me',   text: 'Hey Daniel, do you have a moment to review the latest component changes?', time: '10:41' },
@@ -44,7 +44,17 @@ const DM_PROFILES: DMProfile[] = [
 
 export default function App() {
   const [selectedDMId, setSelectedDMId] = useState<string | null>(null);
+  const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null);
+  const [channelReloadTick, setChannelReloadTick] = useState(0);
+  const [mutedChannelIds, setMutedChannelIds] = useState<Set<string>>(new Set());
   const selectedDM = DM_PROFILES.find(p => p.id === selectedDMId) ?? null;
+
+  const handleChannelsChanged = () => setChannelReloadTick(v => v + 1);
+  const handleToggleMute = (id: string) => setMutedChannelIds(prev => {
+    const n = new Set(prev);
+    n.has(id) ? n.delete(id) : n.add(id);
+    return n;
+  });
 
   return (
     <div className="h-screen flex bg-white overflow-hidden">
@@ -53,8 +63,19 @@ export default function App() {
         selectedDMId={selectedDMId}
         onSelectDM={setSelectedDMId}
         onClearDM={() => setSelectedDMId(null)}
+        selectedChannelId={selectedChannelId}
+        onSelectChannel={setSelectedChannelId}
+        reloadTrigger={channelReloadTick}
+        mutedChannelIds={mutedChannelIds}
       />
-      <ChatArea selectedDM={selectedDM} />
+      <ChatArea
+        selectedDM={selectedDM}
+        selectedChannelId={selectedChannelId}
+        onSelectChannel={setSelectedChannelId}
+        onChannelsChanged={handleChannelsChanged}
+        onToggleMute={handleToggleMute}
+        mutedChannelIds={mutedChannelIds}
+      />
       <RightPanel selectedDM={selectedDM} />
     </div>
   );

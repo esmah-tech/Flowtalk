@@ -16,7 +16,7 @@ type SearchResult = {
 const PERSON_GRADIENTS: Record<string, string> = {
   'Sophia Wilson':   'from-pink-400 to-orange-400',
   'Michael Brown':   'from-green-400 to-teal-500',
-  'Nathan Mitchell': 'from-indigo-400 to-blue-500',
+  'Nathan Mitchell': 'from-[#4d298c] to-purple-400',
 };
 
 const allResults: SearchResult[] = [
@@ -206,7 +206,7 @@ export function SearchModal({ isOpen, onClose }: SearchModalProps) {
                         <FileText size={16} className="text-gray-400 flex-shrink-0" />
                       )}
                       {result.type === 'person' && (
-                        <div className={`w-6 h-6 rounded bg-gradient-to-br ${PERSON_GRADIENTS[result.title] ?? 'from-blue-400 to-purple-400'} flex-shrink-0`} />
+                        <div className={`w-6 h-6 rounded bg-gradient-to-br ${PERSON_GRADIENTS[result.title] ?? 'from-[#4d298c] to-purple-400'} flex-shrink-0`} />
                       )}
                       {result.type === 'channel' && (
                         <Hash size={16} className="text-gray-400 flex-shrink-0" />

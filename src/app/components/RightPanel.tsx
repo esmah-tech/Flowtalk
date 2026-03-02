@@ -131,12 +131,12 @@ function AIAnalyzerTab() {
       {/* Detected Task */}
       <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
         <div className="flex items-start gap-3">
-          <div className="w-8 h-8 rounded bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center flex-shrink-0">
+          <div className="w-8 h-8 rounded bg-gradient-to-br from-[#4d298c] to-purple-400 flex items-center justify-center flex-shrink-0">
             <Sparkles size={16} className="text-white" />
           </div>
           <div className="flex-1">
             <div className="text-[14px] text-gray-900 leading-relaxed">
-              <span className="font-semibold text-blue-600">@Daniel A.</span> has been assigned:{' '}
+              <span className="font-semibold text-[#4d298c]">@Daniel A.</span> has been assigned:{' '}
               <span className="font-medium">Keep layers organized</span> — added to task board
             </div>
             <div className="text-[12px] text-gray-500 mt-2">Detected 2 minutes ago</div>
@@ -145,8 +145,8 @@ function AIAnalyzerTab() {
       </div>
 
       {/* Info text */}
-      <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-100">
-        <p className="text-[12px] text-blue-900 leading-relaxed">
+      <div className="mt-4 p-3 bg-[#ede8f7] rounded-lg border border-[#d4c6f0]">
+        <p className="text-[12px] text-[#4d298c] leading-relaxed">
           AI Analyzer monitors your channel conversations and automatically detects tasks, assignments, and action items. Detected items are added to your task board.
         </p>
       </div>
@@ -334,7 +334,7 @@ function FilesTab() {
               className="p-3 hover:bg-gray-50 rounded border border-gray-200"
             >
               <div className="text-[13px] font-medium text-gray-900 mb-1">{link.title}</div>
-              <a href={`https://${link.url}`} target="_blank" rel="noopener noreferrer" className="text-[12px] text-blue-600 hover:underline block mb-1">{link.url}</a>
+              <a href={`https://${link.url}`} target="_blank" rel="noopener noreferrer" className="text-[12px] text-[#4d298c] hover:underline block mb-1">{link.url}</a>
               <div className="text-[11px] text-gray-500">{link.date}</div>
             </div>
           ))}

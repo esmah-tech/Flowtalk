@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Plus, Check, Video, LayoutGrid, Activity, AtSign } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { Popover, PopoverContent, PopoverTrigger } from '@/app/components/ui/popover';
+import { supabase } from '@/lib/supabase';
 
 const STATUS_OPTIONS = [
   { id: 'online',  label: 'Online',          color: '#d7f78b' },
@@ -69,7 +70,7 @@ export function LeftRail() {
       {/* User Avatar */}
       <Popover>
         <PopoverTrigger asChild>
-          <button className="w-9 h-9 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 focus:outline-none focus:ring-2 focus:ring-white/30" />
+          <button className="w-9 h-9 rounded-lg bg-gradient-to-br from-[#4d298c] to-purple-600 focus:outline-none focus:ring-2 focus:ring-white/30" />
         </PopoverTrigger>
 
         <PopoverContent side="top" align="start" sideOffset={8}
@@ -77,7 +78,7 @@ export function LeftRail() {
 
           {/* Profile header */}
           <div className="p-4 flex flex-col items-center border-b border-gray-100">
-            <div className="w-16 h-16 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 mb-3" />
+            <div className="w-16 h-16 rounded-full bg-gradient-to-br from-[#4d298c] to-purple-600 mb-3" />
             <div className="font-semibold text-[16px] text-gray-900">Esma I.</div>
             <div className="text-[13px] text-gray-500 mt-0.5">Product Designer</div>
             <div className="text-[12px] text-gray-400 mt-0.5">esma@flowtalk.com</div>
@@ -111,7 +112,7 @@ export function LeftRail() {
               Edit Profile
             </button>
             <button
-              onClick={() => navigate('/signin')}
+              onClick={async () => { await supabase.auth.signOut(); navigate('/signin'); }}
               className="w-full py-2.5 rounded-lg font-semibold text-[13px] text-gray-700 border border-gray-300 hover:bg-gray-50"
             >
               Sign Out

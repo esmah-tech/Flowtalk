@@ -39,6 +39,14 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+
+  /* Brand color system */
+  --color-primary: #4d298c;
+  --color-primary-light: #ede8f7;
+  --color-lime: #d7f78b;
+  --color-text: #111827;
+  --color-border: #E5E7EB;
+  --color-sidebar-bg: #F7F8FA;
 }
 
 .dark {
@@ -126,6 +134,7 @@
 
   body {
     @apply bg-background text-foreground;
+    font-family: 'Inter', sans-serif;
   }
 
   /**

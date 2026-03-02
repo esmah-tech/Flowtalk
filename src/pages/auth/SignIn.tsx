@@ -1,4 +1,4 @@
-import { Link } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 import { AuthLayout } from './AuthLayout';
 import { FlowTalkLogo } from '@/app/components/FlowTalkLogo';
 import { authInputClass, authInputStyle, authButtonClass, authButtonStyle, authGoogleButtonClass, authGoogleButtonStyle } from './authStyles';
@@ -7,6 +7,7 @@ import { Input } from '@/app/components/ui/input';
 import { Button } from '@/app/components/ui/button';
 import { Checkbox } from '@/app/components/ui/checkbox';
 import React, { useState } from 'react';
+import { supabase } from '@/lib/supabase';
 
 function GoogleIcon() {
   return (
@@ -32,19 +33,29 @@ function GoogleIcon() {
 }
 
 export default function SignIn() {
+  const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [remember, setRemember] = useState(false);
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const next: typeof errors = {};
     if (!email.trim()) next.email = 'Email is required';
     if (!password) next.password = 'Password is required';
     setErrors(next);
-    if (Object.keys(next).length === 0) {
-      // Would sign in here
+    if (Object.keys(next).length > 0) return;
+
+    setLoading(true);
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    setLoading(false);
+
+    if (error) {
+      setErrors({ password: error.message });
+    } else {
+      navigate('/');
     }
   };
 
@@ -118,10 +129,11 @@ export default function SignIn() {
 
         <Button
           type="submit"
+          disabled={loading}
           className={authButtonClass}
           style={authButtonStyle}
         >
-          Sign In
+          {loading ? 'Signing in…' : 'Sign In'}
         </Button>
       </form>
 
