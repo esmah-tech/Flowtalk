@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, Search, Hash, Plus, X, Inbox, BellOff } from 'lucide-react';
+import { ChevronDown, ChevronRight, Search, Hash, Plus, X, Inbox } from 'lucide-react';
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 
@@ -153,6 +153,31 @@ export function Sidebar({
     localStorage.setItem('flowtalk_dnd', String(next));
   };
 
+  const [unreadChannels, setUnreadChannels] = useState<Map<string, { hasMention: boolean }>>(new Map());
+
+  useEffect(() => {
+    const sub = supabase
+      .channel('sidebar-msg-inserts')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'messages' },
+        (payload) => {
+          const msg = payload.new as { channel_id: string; content: string };
+          if (msg.channel_id === selectedChannelId) return;
+          if (mutedChannelIds.has(msg.channel_id)) return;
+          const hasMention = msg.content.includes('@');
+          setUnreadChannels(prev => {
+            const next = new Map(prev);
+            const existing = next.get(msg.channel_id);
+            next.set(msg.channel_id, { hasMention: (existing?.hasMention ?? false) || hasMention });
+            return next;
+          });
+        }
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(sub); };
+  }, [selectedChannelId, mutedChannelIds]);
+
   const loadChannels = useCallback(async () => {
     const { data } = await supabase
       .from('channels')
@@ -172,6 +197,12 @@ export function Sidebar({
     onSelectChannel(id);
     setActiveNavItem(null);
     onClearDM();
+    setUnreadChannels(prev => {
+      if (!prev.has(id)) return prev;
+      const next = new Map(prev);
+      next.delete(id);
+      return next;
+    });
   };
 
   const handleSelectDM = (id: string) => {
@@ -308,6 +339,9 @@ export function Sidebar({
                   <div className="space-y-0.5 px-2 pb-0.5">
                     {(q === '' ? catChannels : filtered).map(channel => {
                       const active = isSelected(channel.id);
+                      const isMuted = mutedChannelIds.has(channel.id);
+                      const unread = unreadChannels.get(channel.id);
+                      const showDot = !!unread && !isMuted && (!focusMode || unread.hasMention);
                       return (
                         <button
                           key={channel.id}
@@ -315,10 +349,11 @@ export function Sidebar({
                           className={`w-full flex items-center gap-2 pl-5 pr-2 py-1.5 rounded text-[13px] text-left ${active ? sel : def}`}
                         >
                           <Hash size={13} className={active ? 'text-[#4d298c] shrink-0' : 'text-gray-400 shrink-0'} />
-                          <span className={`truncate flex-1 ${active ? 'font-medium' : ''}`}>{channel.name}</span>
-                          {mutedChannelIds.has(channel.id) && (
-                            <BellOff size={11} className="text-gray-400 shrink-0" />
-                          )}
+                          <span className={`truncate flex-1 ${active ? 'font-medium' : showDot ? 'font-bold text-[#111827]' : ''}`}>
+                            {channel.name}
+                          </span>
+                          {isMuted && <span className="text-[11px] shrink-0 leading-none">🔇</span>}
+                          {showDot && <span className="w-1.5 h-1.5 rounded-full bg-[#4d298c] shrink-0 transition-all duration-200" />}
                         </button>
                       );
                     })}

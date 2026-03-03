@@ -46,13 +46,21 @@ export default function App() {
   const [selectedDMId, setSelectedDMId] = useState<string | null>(null);
   const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null);
   const [channelReloadTick, setChannelReloadTick] = useState(0);
-  const [mutedChannelIds, setMutedChannelIds] = useState<Set<string>>(new Set());
+  const [mutedChannelIds, setMutedChannelIds] = useState<Set<string>>(() => {
+    try {
+      const stored = localStorage.getItem('flowtalk_muted_channels');
+      return stored ? new Set<string>(JSON.parse(stored)) : new Set<string>();
+    } catch {
+      return new Set<string>();
+    }
+  });
   const selectedDM = DM_PROFILES.find(p => p.id === selectedDMId) ?? null;
 
   const handleChannelsChanged = () => setChannelReloadTick(v => v + 1);
   const handleToggleMute = (id: string) => setMutedChannelIds(prev => {
     const n = new Set(prev);
     n.has(id) ? n.delete(id) : n.add(id);
+    localStorage.setItem('flowtalk_muted_channels', JSON.stringify([...n]));
     return n;
   });
 
