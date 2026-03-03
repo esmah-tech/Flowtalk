@@ -1,4 +1,4 @@
-import { Hash, Users, Pin, Search, MoreHorizontal, Settings, Smile, Paperclip, AtSign, Send, Heart, Mic, Square } from 'lucide-react';
+import { Hash, Users, Search, MoreHorizontal, Settings, Smile, Paperclip, AtSign, Send, Heart, Mic, Square, Inbox } from 'lucide-react';
 import React, { useState, useEffect, useCallback } from 'react';
 import { SearchModal } from './SearchModal';
 import type { DMProfile } from '../App';
@@ -21,7 +21,12 @@ type DbMessage = {
   created_at: string;
 };
 
-const EMOJIS = ['😀', '😂', '❤️', '👍', '🎉', '🔥', '✅', '👀', '💯', '🙌', '😎', '🤔'];
+const EMOJIS = [
+  '😀','😂','😍','🥰','😎','🤔','😢','😤','🤯','🥳','😅','🤣',
+  '👍','👎','👏','🙌','🤝','🙏','✌️','💪','🤞','👌','🫡','🫶',
+  '❤️','🧡','💛','💚','💙','💜','🖤','💔','💯','✅','🔥','⭐',
+  '🎉','🚀','💡','🎯','🏆','🎨','👀','💬','📌','🗓️','📎','🔗',
+];
 const MENTION_MEMBERS = ['Daniel A.', 'Emily D.', 'Sophia Wilson', 'Diana T.'];
 
 type SentMessage =
@@ -149,7 +154,6 @@ export function ChatArea({
   const handleDeleteChannel = async () => {
     if (!selectedChannelId) return;
     await supabase.from('channels').delete().eq('id', selectedChannelId);
-    setSettingsOpen(false);
     setDeleteConfirm(false);
     onSelectChannel(null);
     onChannelsChanged();
@@ -200,15 +204,77 @@ export function ChatArea({
           <button className="p-2 hover:bg-gray-100 rounded transition-colors">
             <Users size={18} className="text-gray-600" />
           </button>
-          <button className="p-2 hover:bg-gray-100 rounded transition-colors">
-            <Pin size={18} className="text-gray-600" />
-          </button>
-          <button
-            onClick={() => { setRenameInput(channelName); setSettingsOpen(true); }}
-            className="bg-[#ede8f7] text-[#4d298c] rounded-lg p-1.5 hover:bg-[#ddd5f5] transition-colors"
-          >
-            <Settings size={18} />
-          </button>
+          <div className="relative">
+            <button
+              onClick={() => { setRenameInput(channelName); setSettingsOpen(v => !v); }}
+              className="bg-[#ede8f7] text-[#4d298c] rounded-lg p-1.5 hover:bg-[#ddd5f5] transition-colors"
+            >
+              <Settings size={18} />
+            </button>
+
+            {settingsOpen && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={closeSettings} />
+                <div className="absolute top-full right-0 mt-1 w-[260px] bg-white rounded-xl shadow-xl border border-[#E5E7EB] z-50 overflow-hidden">
+
+                  {/* Rename */}
+                  <div className="p-3 border-b border-[#E5E7EB]">
+                    <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 block mb-1.5">Rename channel</label>
+                    <input
+                      autoFocus
+                      value={renameInput}
+                      onChange={e => setRenameInput(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && handleRenameChannel()}
+                      className="w-full border border-[#E5E7EB] rounded-lg px-3 py-1.5 text-[13px] outline-none focus:border-[#4d298c] focus:ring-2 focus:ring-[#ede8f7]"
+                    />
+                    <button
+                      onClick={handleRenameChannel}
+                      disabled={renameSaving || !renameInput.trim()}
+                      className="mt-2 w-full py-1.5 bg-[#4d298c] text-white text-[13px] font-semibold rounded-lg hover:bg-[#3d1f70] disabled:opacity-50 transition-colors"
+                    >
+                      {renameSaving ? 'Saving…' : 'Save'}
+                    </button>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="py-1">
+                    <button
+                      onClick={() => {
+                        if (selectedChannelId) onToggleMute(selectedChannelId);
+                        closeSettings();
+                      }}
+                      className="w-full text-left px-4 py-2.5 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors"
+                    >
+                      {selectedChannelId && mutedChannelIds.has(selectedChannelId) ? 'Unmute channel' : 'Mute channel'}
+                    </button>
+                    <button className="w-full text-left px-4 py-2.5 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors">
+                      Copy link
+                    </button>
+                    <button className="w-full text-left px-4 py-2.5 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors">
+                      Mark as read
+                    </button>
+                  </div>
+
+                  {/* Danger */}
+                  <div className="border-t border-[#E5E7EB] py-1">
+                    <button
+                      onClick={() => { closeSettings(); onSelectChannel(null); }}
+                      className="w-full text-left px-4 py-2.5 text-[13px] text-red-500 hover:bg-red-50 transition-colors"
+                    >
+                      Leave channel
+                    </button>
+                    <button
+                      onClick={() => { closeSettings(); setDeleteConfirm(true); }}
+                      className="w-full text-left px-4 py-2.5 text-[13px] text-red-500 hover:bg-red-50 transition-colors"
+                    >
+                      Delete channel
+                    </button>
+                  </div>
+
+                </div>
+              </>
+            )}
+          </div>
         </div>
 
       </div>
@@ -317,6 +383,12 @@ export function ChatArea({
               );
             })}
           </>
+        ) : selectedChannelId === '' ? (
+          /* Inbox — empty state */
+          <div className="flex flex-col items-center justify-center h-full text-center">
+            <Inbox size={44} className="text-gray-300 mb-3" strokeWidth={1.5} />
+            <p className="text-[14px] text-gray-400">Your inbox is empty for now.</p>
+          </div>
         ) : (
           /* Nothing selected — show placeholder hardcoded messages */
           <>
@@ -453,7 +525,7 @@ export function ChatArea({
       </div>
 
       {/* Input Area */}
-      <div className="border-t border-gray-200 p-4">
+      <div className="border-t border-gray-200 p-4 relative">
         <div className="border border-gray-300 rounded-lg focus-within:border-[#4d298c] focus-within:ring-2 focus-within:ring-purple-100">
           <textarea
             ref={textareaRef}
@@ -492,32 +564,12 @@ export function ChatArea({
                   <Paperclip size={18} className="text-gray-600" />
                 </button>
 
-                <div className="relative">
-                  <button
-                    onClick={() => { setEmojiPickerOpen(v => !v); setMentionDropdownOpen(false); }}
-                    className={`p-1.5 rounded ${emojiPickerOpen ? 'bg-gray-100' : 'hover:bg-gray-100'}`}
-                  >
-                    <Smile size={18} className="text-gray-600" />
-                  </button>
-                  {emojiPickerOpen && (
-                    <>
-                      <div className="fixed inset-0 z-40" onClick={() => setEmojiPickerOpen(false)} />
-                      <div className="absolute bottom-full left-0 mb-2 bg-white border border-gray-200 rounded-lg shadow-lg z-50 p-2">
-                        <div className="grid grid-cols-6 gap-0.5">
-                          {EMOJIS.map(emoji => (
-                            <button
-                              key={emoji}
-                              onClick={() => handleEmojiClick(emoji)}
-                              className="text-xl p-1.5 hover:bg-gray-100 rounded leading-none"
-                            >
-                              {emoji}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    </>
-                  )}
-                </div>
+                <button
+                  onClick={() => { setEmojiPickerOpen(v => !v); setMentionDropdownOpen(false); }}
+                  className={`p-1.5 rounded ${emojiPickerOpen ? 'bg-[#ede8f7] text-[#4d298c]' : 'hover:bg-gray-100 text-gray-600'}`}
+                >
+                  <Smile size={18} />
+                </button>
 
                 <div className="relative">
                   <button
@@ -571,104 +623,58 @@ export function ChatArea({
             </div>
           )}
         </div>
+
+        {emojiPickerOpen && (
+          <>
+            <div className="fixed inset-0 z-40" onClick={() => setEmojiPickerOpen(false)} />
+            <div className="absolute bottom-full left-0 mb-2 w-[320px] max-h-[400px] overflow-y-auto bg-white border border-[#E5E7EB] rounded-xl shadow-xl z-50 p-3">
+              <div className="grid grid-cols-8 gap-0.5">
+                {EMOJIS.map(emoji => (
+                  <button
+                    key={emoji}
+                    onClick={() => handleEmojiClick(emoji)}
+                    className="text-2xl p-2 hover:bg-[#ede8f7] rounded-lg leading-none flex items-center justify-center"
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
-      {settingsOpen && (
+      {deleteConfirm && (
         <div
           className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center"
-          onClick={closeSettings}
+          onClick={() => setDeleteConfirm(false)}
         >
           <div
             className="bg-white rounded-xl shadow-xl w-80 border border-[#E5E7EB] overflow-hidden"
             onClick={e => e.stopPropagation()}
           >
-            {deleteConfirm ? (
-              /* ── Delete confirmation ── */
-              <>
-                <div className="px-5 py-4 border-b border-[#E5E7EB]">
-                  <h3 className="font-semibold text-[15px] text-gray-900">Delete channel?</h3>
-                </div>
-                <div className="px-5 py-4">
-                  <p className="text-[13px] text-gray-600 leading-relaxed">
-                    This will permanently delete <span className="font-semibold">#{channelName}</span> and all its messages. This cannot be undone.
-                  </p>
-                  <div className="flex gap-2 mt-4">
-                    <button
-                      onClick={() => setDeleteConfirm(false)}
-                      className="flex-1 py-2 rounded-lg text-[13px] font-semibold text-gray-700 border border-[#E5E7EB] hover:bg-gray-50 transition-colors"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={handleDeleteChannel}
-                      className="flex-1 py-2 bg-red-500 text-white rounded-lg text-[13px] font-semibold hover:bg-red-600 transition-colors"
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </div>
-              </>
-            ) : (
-              /* ── Settings view ── */
-              <>
-                <div className="px-5 py-4 border-b border-[#E5E7EB]">
-                  <h3 className="font-semibold text-[15px] text-gray-900">Channel settings</h3>
-                </div>
-
-                {/* Rename */}
-                <div className="px-5 py-4 border-b border-[#E5E7EB]">
-                  <label className="text-[12px] font-medium text-gray-700 block mb-1.5">Rename channel</label>
-                  <input
-                    value={renameInput}
-                    onChange={e => setRenameInput(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && handleRenameChannel()}
-                    className="w-full border border-[#E5E7EB] rounded-lg px-3 py-2 text-[13px] outline-none focus:border-[#4d298c] focus:ring-2 focus:ring-[#ede8f7]"
-                  />
-                  <button
-                    onClick={handleRenameChannel}
-                    disabled={renameSaving || !renameInput.trim()}
-                    className="mt-2.5 w-full py-2 bg-[#4d298c] text-white text-[13px] font-semibold rounded-lg hover:bg-[#3d1f70] disabled:opacity-50 transition-colors"
-                  >
-                    {renameSaving ? 'Saving…' : 'Save'}
-                  </button>
-                </div>
-
-                {/* Actions */}
-                <div className="py-1">
-                  <button
-                    onClick={() => {
-                      if (selectedChannelId) onToggleMute(selectedChannelId);
-                      closeSettings();
-                    }}
-                    className="w-full text-left px-5 py-2.5 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors"
-                  >
-                    {selectedChannelId && mutedChannelIds.has(selectedChannelId) ? 'Unmute channel' : 'Mute channel'}
-                  </button>
-                  <button className="w-full text-left px-5 py-2.5 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors">
-                    Copy link
-                  </button>
-                  <button className="w-full text-left px-5 py-2.5 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors">
-                    Mark as read
-                  </button>
-                </div>
-
-                {/* Danger actions */}
-                <div className="border-t border-[#E5E7EB] py-1">
-                  <button
-                    onClick={() => { closeSettings(); onSelectChannel(null); }}
-                    className="w-full text-left px-5 py-2.5 text-[13px] text-red-500 hover:bg-red-50 transition-colors"
-                  >
-                    Leave channel
-                  </button>
-                  <button
-                    onClick={() => setDeleteConfirm(true)}
-                    className="w-full text-left px-5 py-2.5 text-[13px] text-red-500 hover:bg-red-50 transition-colors"
-                  >
-                    Delete channel
-                  </button>
-                </div>
-              </>
-            )}
+            <div className="px-5 py-4 border-b border-[#E5E7EB]">
+              <h3 className="font-semibold text-[15px] text-gray-900">Delete channel?</h3>
+            </div>
+            <div className="px-5 py-4">
+              <p className="text-[13px] text-gray-600 leading-relaxed">
+                This will permanently delete <span className="font-semibold">#{channelName}</span> and all its messages. This cannot be undone.
+              </p>
+              <div className="flex gap-2 mt-4">
+                <button
+                  onClick={() => setDeleteConfirm(false)}
+                  className="flex-1 py-2 rounded-lg text-[13px] font-semibold text-gray-700 border border-[#E5E7EB] hover:bg-gray-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleDeleteChannel}
+                  className="flex-1 py-2 bg-red-500 text-white rounded-lg text-[13px] font-semibold hover:bg-red-600 transition-colors"
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
