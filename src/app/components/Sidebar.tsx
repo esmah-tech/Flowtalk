@@ -108,6 +108,19 @@ function CreateChannelModal({ initialCategory, onClose, onCreated }: CreateChann
   );
 }
 
+// ─── Toggle Pill ─────────────────────────────────────────────────────────────
+
+function TogglePill({ on, onClick }: { on: boolean; onClick: (e: React.MouseEvent) => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`w-9 h-5 rounded-full relative transition-all duration-200 flex-shrink-0 ${on ? 'bg-[#4d298c]' : 'bg-[#E5E7EB]'}`}
+    >
+      <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow-sm transition-all duration-200 ${on ? 'left-[18px]' : 'left-0.5'}`} />
+    </button>
+  );
+}
+
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
 
 export function Sidebar({
@@ -124,6 +137,21 @@ export function Sidebar({
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [activeNavItem, setActiveNavItem] = useState<string | null>(null);
+  const [focusMode, setFocusMode] = useState(() => localStorage.getItem('flowtalk_focus_mode') === 'true');
+  const [dnd, setDnd] = useState(() => localStorage.getItem('flowtalk_dnd') === 'true');
+  const [modePopupOpen, setModePopupOpen] = useState(false);
+
+  const toggleFocusMode = () => {
+    const next = !focusMode;
+    setFocusMode(next);
+    localStorage.setItem('flowtalk_focus_mode', String(next));
+  };
+
+  const toggleDnd = () => {
+    const next = !dnd;
+    setDnd(next);
+    localStorage.setItem('flowtalk_dnd', String(next));
+  };
 
   const loadChannels = useCallback(async () => {
     const { data } = await supabase
@@ -177,7 +205,10 @@ export function Sidebar({
       {/* Header */}
       <div className="p-3 border-b border-gray-200">
         <button className="w-full flex items-center justify-between hover:bg-gray-100 rounded px-2 py-1.5">
-          <span className="font-bold text-[15px] text-gray-900">FlowTalk</span>
+          <div className="flex items-center gap-1.5">
+            <span className="font-bold text-[15px] text-gray-900">FlowTalk</span>
+            {dnd && <span className="text-[13px]">🔕</span>}
+          </div>
           <ChevronDown size={16} className="text-gray-600" />
         </button>
       </div>
@@ -387,6 +418,49 @@ export function Sidebar({
           )}
         </div>
 
+      </div>
+
+      {/* Bottom bar */}
+      <div className="relative">
+        {modePopupOpen && (
+          <>
+            <div className="fixed inset-0 z-40" onClick={() => setModePopupOpen(false)} />
+            <div className="absolute bottom-full left-2 right-2 mb-1 bg-white rounded-xl shadow-xl border border-[#E5E7EB] z-50 overflow-hidden">
+              {/* Focus Mode row */}
+              <div className="flex items-center justify-between px-4 py-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-[14px]">🎯</span>
+                  <span className="text-[13px] font-medium text-[#444]">Focus Mode</span>
+                </div>
+                <TogglePill on={focusMode} onClick={(e) => { e.stopPropagation(); toggleFocusMode(); }} />
+              </div>
+              <div className="border-t border-[#E5E7EB]" />
+              {/* DND row */}
+              <div className="flex items-center justify-between px-4 py-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[14px]">🔕</span>
+                    <span className="text-[13px] font-medium text-[#444]">Do Not Disturb</span>
+                  </div>
+                  <div className="text-[11px] text-gray-400 mt-0.5 pl-6">Silence all until you turn off</div>
+                </div>
+                <TogglePill on={dnd} onClick={(e) => { e.stopPropagation(); toggleDnd(); }} />
+              </div>
+            </div>
+          </>
+        )}
+        <div
+          onClick={() => setModePopupOpen(v => !v)}
+          className={`w-full h-10 flex items-center justify-between px-3 border-t border-[#E5E7EB] cursor-pointer transition-all duration-200 ${focusMode ? 'bg-[#f0edf7]' : ''}`}
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-[14px]">🎯</span>
+            <span className={`text-[13px] transition-all duration-200 ${focusMode ? 'font-semibold text-[#4d298c]' : 'font-medium text-[#444]'}`}>
+              Focus Mode
+            </span>
+          </div>
+          <TogglePill on={focusMode} onClick={(e) => { e.stopPropagation(); toggleFocusMode(); }} />
+        </div>
       </div>
 
       {/* Create Channel Modal */}
