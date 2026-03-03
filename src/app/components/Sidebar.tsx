@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, Search, Hash, Plus, X, Inbox } from 'lucide-react';
+import { ChevronDown, ChevronRight, Search, Hash, Plus, X, Inbox, Target, BellOff } from 'lucide-react';
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 
@@ -238,7 +238,7 @@ export function Sidebar({
         <button className="w-full flex items-center justify-between hover:bg-gray-100 rounded px-2 py-1.5">
           <div className="flex items-center gap-1.5">
             <span className="font-bold text-[15px] text-gray-900">FlowTalk</span>
-            {dnd && <span className="text-[13px]">🔕</span>}
+            {dnd && <span className="text-[12px] text-gray-500">🔕</span>}
           </div>
           <ChevronDown size={16} className="text-gray-600" />
         </button>
@@ -461,20 +461,16 @@ export function Sidebar({
           <>
             <div className="fixed inset-0 z-40" onClick={() => setModePopupOpen(false)} />
             <div className="absolute bottom-full left-2 right-2 mb-1 bg-white rounded-xl shadow-xl border border-[#E5E7EB] z-50 overflow-hidden">
-              {/* Focus Mode row */}
-              <div className="flex items-center justify-between px-4 py-3">
-                <div className="flex items-center gap-2">
-                  <span className="text-[14px]">🎯</span>
-                  <span className="text-[13px] font-medium text-[#444]">Focus Mode</span>
-                </div>
-                <TogglePill on={focusMode} onClick={(e) => { e.stopPropagation(); toggleFocusMode(); }} />
+              <div className="px-4 pt-3 pb-1">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+                  Notifications
+                </span>
               </div>
               <div className="border-t border-[#E5E7EB]" />
-              {/* DND row */}
               <div className="flex items-center justify-between px-4 py-3">
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="text-[14px]">🔕</span>
+                    <BellOff size={15} className="text-gray-500" />
                     <span className="text-[13px] font-medium text-[#444]">Do Not Disturb</span>
                   </div>
                   <div className="text-[11px] text-gray-400 mt-0.5 pl-6">Silence all until you turn off</div>
@@ -489,7 +485,7 @@ export function Sidebar({
           className={`w-full h-10 flex items-center justify-between px-3 border-t border-[#E5E7EB] cursor-pointer transition-all duration-200 ${focusMode ? 'bg-[#f0edf7]' : ''}`}
         >
           <div className="flex items-center gap-2">
-            <span className="text-[14px]">🎯</span>
+            <Target size={15} className="text-[#4d298c]" />
             <span className={`text-[13px] transition-all duration-200 ${focusMode ? 'font-semibold text-[#4d298c]' : 'font-medium text-[#444]'}`}>
               Focus Mode
             </span>
