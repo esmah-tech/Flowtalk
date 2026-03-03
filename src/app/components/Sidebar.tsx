@@ -1,6 +1,8 @@
-import { ChevronDown, ChevronRight, Search, Hash, Plus, X, Inbox, Target, BellOff } from 'lucide-react';
+import { ChevronDown, ChevronRight, Search, Hash, Plus, X, Inbox, Target, BellOff, Settings, UserPlus, Link, LogOut } from 'lucide-react';
 import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router';
 import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/lib/AuthContext';
 
 type DbChannel = {
   id: string;
@@ -127,6 +129,8 @@ export function Sidebar({
   selectedDMId, onSelectDM, onClearDM, selectedChannelId, onSelectChannel,
   reloadTrigger, mutedChannelIds,
 }: SidebarProps) {
+  const navigate = useNavigate();
+  const { session } = useAuth();
   const [channels, setChannels] = useState<DbChannel[]>([]);
   const [loading, setLoading] = useState(true);
   const [dmExpanded, setDmExpanded] = useState(true);
@@ -140,6 +144,19 @@ export function Sidebar({
   const [focusMode, setFocusMode] = useState(() => localStorage.getItem('flowtalk_focus_mode') === 'true');
   const [dnd, setDnd] = useState(() => localStorage.getItem('flowtalk_dnd') === 'true');
   const [modePopupOpen, setModePopupOpen] = useState(false);
+  const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    navigate('/signin');
+  };
+
+  const handleCopyLink = () => {
+    navigator.clipboard.writeText('flowtalk.com/join/abc123');
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2000);
+  };
 
   const toggleFocusMode = () => {
     const next = !focusMode;
@@ -234,13 +251,65 @@ export function Sidebar({
   return (
     <div className="w-60 min-h-0 bg-[#f8f9fa] border-r border-gray-200 flex flex-col">
       {/* Header */}
-      <div className="p-3 border-b border-gray-200">
-        <button className="w-full flex items-center justify-between hover:bg-gray-100 rounded px-2 py-1.5">
+      <div className="p-3 border-b border-gray-200 relative">
+        {workspaceMenuOpen && (
+          <>
+            <div className="fixed inset-0 z-40" onClick={() => setWorkspaceMenuOpen(false)} />
+            <div className="absolute top-full left-0 mt-1 w-[220px] bg-white rounded-xl shadow-lg border border-[#E5E7EB] z-50 overflow-hidden">
+              {/* Workspace + user info */}
+              <div className="px-3 py-3 bg-gray-50 border-b border-[#E5E7EB]">
+                <div className="font-bold text-[14px] text-[#111827]">FlowTalk</div>
+                <div className="text-[11px] text-gray-400 mt-0.5 truncate">{session?.user?.email ?? ''}</div>
+              </div>
+              {/* Actions */}
+              <div className="px-1 py-1">
+                <button
+                  onClick={() => { setWorkspaceMenuOpen(false); navigate('/settings'); }}
+                  className="w-full flex items-center gap-2 px-3 py-2 hover:bg-[#f7f8fa] rounded-lg text-[13px] text-[#111827] transition-all duration-150"
+                >
+                  <Settings size={15} className="text-gray-500 shrink-0" />
+                  Workspace settings
+                </button>
+                <button
+                  onClick={() => { setWorkspaceMenuOpen(false); alert('Invite members — coming soon'); }}
+                  className="w-full flex items-center gap-2 px-3 py-2 hover:bg-[#f7f8fa] rounded-lg text-[13px] text-[#111827] transition-all duration-150"
+                >
+                  <UserPlus size={15} className="text-gray-500 shrink-0" />
+                  Invite members
+                </button>
+                <button
+                  onClick={handleCopyLink}
+                  className="w-full flex items-center gap-2 px-3 py-2 hover:bg-[#f7f8fa] rounded-lg text-[13px] text-[#111827] transition-all duration-150"
+                >
+                  <Link size={15} className="text-gray-500 shrink-0" />
+                  {copiedLink ? 'Copied!' : 'Copy invite link'}
+                </button>
+              </div>
+              <div className="border-t border-[#E5E7EB]" />
+              <div className="px-1 py-1">
+                <button
+                  onClick={handleSignOut}
+                  className="w-full flex items-center gap-2 px-3 py-2 hover:bg-[#f7f8fa] rounded-lg text-[13px] text-red-600 transition-all duration-150"
+                >
+                  <LogOut size={15} className="text-red-500 shrink-0" />
+                  Sign out
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+        <button
+          onClick={() => setWorkspaceMenuOpen(v => !v)}
+          className="w-full flex items-center justify-between hover:bg-gray-100 rounded px-2 py-1.5 transition-all duration-150"
+        >
           <div className="flex items-center gap-1.5">
             <span className="font-bold text-[15px] text-gray-900">FlowTalk</span>
-            {dnd && <span className="text-[12px] text-gray-500">🔕</span>}
+            {dnd && <BellOff size={13} className="text-gray-400 shrink-0" />}
           </div>
-          <ChevronDown size={16} className="text-gray-600" />
+          <ChevronDown
+            size={16}
+            className={`text-gray-600 transition-transform duration-150 ${workspaceMenuOpen ? 'rotate-180' : ''}`}
+          />
         </button>
       </div>
 
