@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import {
   ArrowLeft, Home, Users, Shield, Hash, User, Bell, Trash2,
-  Search, Link, UserPlus,
+  Search, Link, UserPlus, CheckCircle, XCircle,
 } from 'lucide-react';
 import { useAuth } from '@/lib/AuthContext';
 import { supabase } from '@/lib/supabase';
@@ -67,6 +67,8 @@ function formatJoined(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+// ─── Skeleton ─────────────────────────────────────────────────────────────────
+
 function SkeletonRow() {
   return (
     <div className="grid grid-cols-[1fr_108px_92px_108px_124px_56px] px-4 py-3 gap-2 items-center border-b border-[#E5E7EB] last:border-b-0">
@@ -86,12 +88,93 @@ function SkeletonRow() {
   );
 }
 
+// ─── Toast ────────────────────────────────────────────────────────────────────
+
+type ToastState = {
+  id: number;
+  success: boolean;
+  name: string;
+  role?: string;
+};
+
+function ToastNotification({ toast, onDismiss }: { toast: ToastState; onDismiss: () => void }) {
+  useEffect(() => {
+    const t = setTimeout(onDismiss, 3000);
+    return () => clearTimeout(t);
+  }, [toast.id, onDismiss]);
+
+  return (
+    <div className="fixed bottom-6 right-6 z-50 bg-white border border-[#E5E7EB] rounded-xl shadow-lg px-4 py-3 w-72 flex items-start gap-3">
+      {toast.success
+        ? <CheckCircle size={18} className="text-green-500 shrink-0 mt-0.5" />
+        : <XCircle size={18} className="text-red-500 shrink-0 mt-0.5" />
+      }
+      <div>
+        <div className="text-[13px] font-semibold text-[#111827]">
+          {toast.success ? 'Role updated' : 'Something went wrong'}
+        </div>
+        <div className="text-[12px] text-gray-500 mt-0.5">
+          {toast.success ? `${toast.name} is now ${toast.role}` : 'Try again.'}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Remove modal ─────────────────────────────────────────────────────────────
+
+function RemoveModal({
+  member,
+  removing,
+  onCancel,
+  onConfirm,
+}: {
+  member: Member;
+  removing: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const name = getDisplayName(member.full_name, member.email);
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/30" onClick={onCancel} />
+      <div className="relative bg-white rounded-2xl shadow-xl px-6 py-5 w-[360px]">
+        <h2 className="text-[16px] font-extrabold text-[#111827] mb-1">Remove {name}?</h2>
+        <p className="text-[13px] text-gray-500 mb-5">
+          They will lose access to all channels immediately.
+        </p>
+        <div className="flex justify-end gap-2">
+          <button
+            onClick={onCancel}
+            disabled={removing}
+            className="px-4 py-2 text-[13px] text-gray-600 border border-[#E5E7EB] rounded-lg hover:bg-gray-50 transition-all duration-150 disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={removing}
+            className="px-4 py-2 text-[13px] text-white bg-red-500 rounded-lg font-medium hover:bg-red-600 transition-all duration-150 disabled:opacity-60"
+          >
+            {removing ? 'Removing…' : 'Remove member'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── MembersPanel ─────────────────────────────────────────────────────────────
+
 function MembersPanel() {
   const { session } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [copiedInvite, setCopiedInvite] = useState(false);
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
+  const [toast, setToast] = useState<ToastState | null>(null);
+  const [removeTarget, setRemoveTarget] = useState<Member | null>(null);
+  const [removing, setRemoving] = useState(false);
 
   const currentUserId = session?.user?.id;
 
@@ -123,6 +206,40 @@ function MembersPanel() {
     }
     fetchMembers();
   }, [currentUserId]);
+
+  const showToast = (t: ToastState) => setToast(t);
+
+  const handleRoleChange = async (member: Member, newRole: 'admin' | 'member') => {
+    const name = getDisplayName(member.full_name, member.email);
+    const { error } = await supabase
+      .from('workspace_members')
+      .update({ role: newRole })
+      .eq('user_id', member.user_id);
+
+    if (!error) {
+      setMembers(prev => prev.map(m =>
+        m.user_id === member.user_id ? { ...m, role: newRole } : m
+      ));
+      showToast({ id: Date.now(), success: true, name, role: newRole.charAt(0).toUpperCase() + newRole.slice(1) });
+    } else {
+      showToast({ id: Date.now(), success: false, name });
+    }
+  };
+
+  const confirmRemove = async () => {
+    if (!removeTarget) return;
+    setRemoving(true);
+    const { error } = await supabase
+      .from('workspace_members')
+      .delete()
+      .eq('user_id', removeTarget.user_id);
+
+    if (!error) {
+      setMembers(prev => prev.filter(m => m.user_id !== removeTarget.user_id));
+    }
+    setRemoving(false);
+    setRemoveTarget(null);
+  };
 
   const handleCopyInvite = () => {
     navigator.clipboard.writeText('flowtalk.com/join/abc123');
@@ -190,6 +307,7 @@ function MembersPanel() {
         {/* Member rows */}
         {!loading && filtered.map((m, idx) => {
           const isCurrentUser = m.user_id === currentUserId;
+          const isOwner = m.role === 'owner';
           const initials = getInitials(m.full_name, m.email);
           const displayName = getDisplayName(m.full_name, m.email);
           const badgeCls = ROLE_BADGE[m.role] ?? ROLE_BADGE.member;
@@ -213,11 +331,22 @@ function MembersPanel() {
                 </div>
               </div>
 
-              {/* Role */}
+              {/* Role — badge for owner/self, dropdown for others */}
               <div>
-                <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${badgeCls}`}>
-                  {m.role.charAt(0).toUpperCase() + m.role.slice(1)}
-                </span>
+                {isOwner || isCurrentUser ? (
+                  <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${badgeCls}`}>
+                    {m.role.charAt(0).toUpperCase() + m.role.slice(1)}
+                  </span>
+                ) : (
+                  <select
+                    value={m.role}
+                    onChange={e => handleRoleChange(m, e.target.value as 'admin' | 'member')}
+                    className="border border-[#E5E7EB] rounded-lg px-2 py-1 text-[12px] bg-white cursor-pointer outline-none focus:border-[#4d298c] transition-colors"
+                  >
+                    <option value="admin">Admin</option>
+                    <option value="member">Member</option>
+                  </select>
+                )}
               </div>
 
               {/* Status */}
@@ -234,16 +363,22 @@ function MembersPanel() {
 
               {/* Channel access */}
               <div>
-                {m.role === 'owner'
+                {isOwner
                   ? <span className="text-[13px] text-gray-600">All channels</span>
                   : <button className="text-[13px] text-[#4d298c] hover:underline">Manage →</button>
                 }
               </div>
 
               {/* Actions */}
-              <div>
-                {!isCurrentUser && (
-                  <button className="text-[12px] text-gray-400 hover:text-red-500 transition-colors">Remove</button>
+              <div className="flex justify-center">
+                {!isCurrentUser && !isOwner && (
+                  <button
+                    onClick={() => setRemoveTarget(m)}
+                    className="text-gray-400 hover:text-red-500 transition-all duration-150"
+                    title="Remove member"
+                  >
+                    <Trash2 size={15} />
+                  </button>
                 )}
               </div>
             </div>
@@ -257,6 +392,21 @@ function MembersPanel() {
           {members.length} member{members.length !== 1 ? 's' : ''}
         </span>
       </div>
+
+      {/* Toast */}
+      {toast && (
+        <ToastNotification toast={toast} onDismiss={() => setToast(null)} />
+      )}
+
+      {/* Remove confirmation modal */}
+      {removeTarget && (
+        <RemoveModal
+          member={removeTarget}
+          removing={removing}
+          onCancel={() => setRemoveTarget(null)}
+          onConfirm={confirmRemove}
+        />
+      )}
     </div>
   );
 }
