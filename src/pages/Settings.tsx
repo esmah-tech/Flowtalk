@@ -181,31 +181,56 @@ function MembersPanel() {
   useEffect(() => {
     async function fetchMembers() {
       setLoading(true);
-      const { data, error } = await supabase
-        .from('workspace_members')
-        .select('user_id, role, status, joined_at, profiles(full_name, email, avatar_url)');
 
-      if (!error && data) {
-        const mapped: Member[] = (data as any[]).map(row => ({
+      // Query 1: fetch all workspace_members rows
+      const { data: membersData, error: membersError } = await supabase
+        .from('workspace_members')
+        .select('user_id, role, joined_at');
+      console.log('[MembersPanel] workspace_members raw:', membersData, 'error:', membersError);
+
+      if (membersError || !membersData) {
+        setLoading(false);
+        return;
+      }
+
+      // Query 2: fetch profiles for each user_id
+      const userIds = membersData.map(r => r.user_id);
+      const { data: profilesData, error: profilesError } = await supabase
+        .from('profiles')
+        .select('id, full_name, email, avatar_url')
+        .in('id', userIds);
+      console.log('[MembersPanel] profiles raw:', profilesData, 'error:', profilesError);
+
+      const profileMap: Record<string, { full_name: string | null; email: string; avatar_url: string | null }> = {};
+      for (const p of (profilesData ?? [])) {
+        profileMap[p.id] = { full_name: p.full_name, email: p.email, avatar_url: p.avatar_url };
+      }
+
+      const mapped: Member[] = membersData.map(row => {
+        const profile = profileMap[row.user_id];
+        const isCurrentUser = row.user_id === currentUserId;
+        return {
           user_id: row.user_id,
           role: row.role ?? 'member',
-          status: row.status ?? 'offline',
+          status: 'offline' as const,
           joined_at: row.joined_at,
-          full_name: row.profiles?.full_name ?? null,
-          email: row.profiles?.email ?? '',
-          avatar_url: row.profiles?.avatar_url ?? null,
-        }));
-        mapped.sort((a, b) => {
-          if (a.user_id === currentUserId) return -1;
-          if (b.user_id === currentUserId) return 1;
-          return 0;
-        });
-        setMembers(mapped);
-      }
+          full_name: profile?.full_name ?? null,
+          email: profile?.email ?? (isCurrentUser ? (session?.user?.email ?? '') : ''),
+          avatar_url: profile?.avatar_url ?? null,
+        };
+      });
+
+      mapped.sort((a, b) => {
+        if (a.user_id === currentUserId) return -1;
+        if (b.user_id === currentUserId) return 1;
+        return 0;
+      });
+
+      setMembers(mapped);
       setLoading(false);
     }
     fetchMembers();
-  }, [currentUserId]);
+  }, [currentUserId, session]);
 
   const showToast = (t: ToastState) => setToast(t);
 
