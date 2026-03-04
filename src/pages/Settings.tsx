@@ -1,10 +1,21 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import {
   ArrowLeft, Home, Users, Shield, Hash, User, Bell, Trash2,
   Search, Link, UserPlus,
 } from 'lucide-react';
 import { useAuth } from '@/lib/AuthContext';
+import { supabase } from '@/lib/supabase';
+
+type Member = {
+  user_id: string;
+  role: 'owner' | 'admin' | 'member';
+  status: 'online' | 'offline';
+  joined_at: string;
+  full_name: string | null;
+  email: string;
+  avatar_url: string | null;
+};
 
 type NavItemId =
   | 'overview' | 'members' | 'permissions' | 'channels'
@@ -32,27 +43,98 @@ const NAV_SECTIONS = [
 
 // ─── Members panel ────────────────────────────────────────────────────────────
 
+const ROLE_BADGE: Record<string, string> = {
+  owner: 'bg-[#fef3c7] text-[#92400e]',
+  admin: 'bg-[#ede8f7] text-[#4d298c]',
+  member: 'bg-[#dcfce7] text-[#166534]',
+};
+
+function getInitials(name: string | null, email: string): string {
+  if (name) {
+    const parts = name.trim().split(/\s+/);
+    if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    return parts[0].slice(0, 2).toUpperCase();
+  }
+  return email.split('@')[0].slice(0, 2).toUpperCase();
+}
+
+function getDisplayName(name: string | null, email: string): string {
+  if (name) return name;
+  return email.split('@')[0].split(/[._-]/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+}
+
+function formatJoined(dateStr: string): string {
+  return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function SkeletonRow() {
+  return (
+    <div className="grid grid-cols-[1fr_108px_92px_108px_124px_56px] px-4 py-3 gap-2 items-center border-b border-[#E5E7EB] last:border-b-0">
+      <div className="flex items-center gap-3">
+        <div className="w-8 h-8 rounded-full bg-gray-200 animate-pulse shrink-0" />
+        <div className="space-y-1.5">
+          <div className="h-3 w-24 bg-gray-200 animate-pulse rounded" />
+          <div className="h-2.5 w-32 bg-gray-200 animate-pulse rounded" />
+        </div>
+      </div>
+      <div className="h-5 w-14 bg-gray-200 animate-pulse rounded-full" />
+      <div className="h-3 w-12 bg-gray-200 animate-pulse rounded" />
+      <div className="h-3 w-16 bg-gray-200 animate-pulse rounded" />
+      <div className="h-3 w-20 bg-gray-200 animate-pulse rounded" />
+      <div />
+    </div>
+  );
+}
+
 function MembersPanel() {
   const { session } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [copiedInvite, setCopiedInvite] = useState(false);
+  const [members, setMembers] = useState<Member[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const email = session?.user?.email ?? '';
-  const namePart = email.split('@')[0] ?? '';
-  const displayName = namePart
-    .split(/[._-]/)
-    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(' ');
-  const initials = namePart.slice(0, 2).toUpperCase();
-  const joinedDate = session?.user?.created_at
-    ? new Date(session.user.created_at).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
-    : '—';
+  const currentUserId = session?.user?.id;
+
+  useEffect(() => {
+    async function fetchMembers() {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from('workspace_members')
+        .select('user_id, role, status, joined_at, profiles(full_name, email, avatar_url)');
+
+      if (!error && data) {
+        const mapped: Member[] = (data as any[]).map(row => ({
+          user_id: row.user_id,
+          role: row.role ?? 'member',
+          status: row.status ?? 'offline',
+          joined_at: row.joined_at,
+          full_name: row.profiles?.full_name ?? null,
+          email: row.profiles?.email ?? '',
+          avatar_url: row.profiles?.avatar_url ?? null,
+        }));
+        mapped.sort((a, b) => {
+          if (a.user_id === currentUserId) return -1;
+          if (b.user_id === currentUserId) return 1;
+          return 0;
+        });
+        setMembers(mapped);
+      }
+      setLoading(false);
+    }
+    fetchMembers();
+  }, [currentUserId]);
 
   const handleCopyInvite = () => {
     navigator.clipboard.writeText('flowtalk.com/join/abc123');
     setCopiedInvite(true);
     setTimeout(() => setCopiedInvite(false), 2000);
   };
+
+  const filtered = members.filter(m => {
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    return getDisplayName(m.full_name, m.email).toLowerCase().includes(q) || m.email.toLowerCase().includes(q);
+  });
 
   return (
     <div className="flex flex-col">
@@ -97,41 +179,83 @@ function MembersPanel() {
           ))}
         </div>
 
-        {/* Current user row */}
-        <div className="grid grid-cols-[1fr_108px_92px_108px_124px_56px] px-4 py-3 gap-2 hover:bg-gray-50 transition-all duration-150 items-center">
-          {/* Member */}
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#4d298c] to-purple-400 flex items-center justify-center shrink-0">
-              <span className="text-white text-[11px] font-bold">{initials}</span>
+        {/* Loading skeletons */}
+        {loading && [0, 1, 2].map(i => <SkeletonRow key={i} />)}
+
+        {/* No results */}
+        {!loading && filtered.length === 0 && (
+          <div className="py-12 text-center text-[13px] text-gray-400">No members found</div>
+        )}
+
+        {/* Member rows */}
+        {!loading && filtered.map((m, idx) => {
+          const isCurrentUser = m.user_id === currentUserId;
+          const initials = getInitials(m.full_name, m.email);
+          const displayName = getDisplayName(m.full_name, m.email);
+          const badgeCls = ROLE_BADGE[m.role] ?? ROLE_BADGE.member;
+
+          return (
+            <div
+              key={m.user_id}
+              className={`grid grid-cols-[1fr_108px_92px_108px_124px_56px] px-4 py-3 gap-2 hover:bg-gray-50 transition-all duration-150 items-center${idx < filtered.length - 1 ? ' border-b border-[#E5E7EB]' : ''}`}
+            >
+              {/* Member */}
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#4d298c] to-purple-400 flex items-center justify-center shrink-0">
+                  <span className="text-white text-[11px] font-bold">{initials}</span>
+                </div>
+                <div className="min-w-0">
+                  <div className="text-[13px] font-medium text-[#111827] truncate">
+                    {displayName}
+                    {isCurrentUser && <span className="ml-1.5 text-[11px] text-gray-400 font-normal">(you)</span>}
+                  </div>
+                  <div className="text-[11px] text-gray-400 truncate">{m.email}</div>
+                </div>
+              </div>
+
+              {/* Role */}
+              <div>
+                <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${badgeCls}`}>
+                  {m.role.charAt(0).toUpperCase() + m.role.slice(1)}
+                </span>
+              </div>
+
+              {/* Status */}
+              <div className="flex items-center gap-1.5">
+                <span
+                  className="w-2 h-2 rounded-full shrink-0"
+                  style={{ backgroundColor: m.status === 'online' ? '#d7f78b' : '#E5E7EB' }}
+                />
+                <span className="text-[13px] text-gray-600">{m.status === 'online' ? 'Active' : 'Offline'}</span>
+              </div>
+
+              {/* Joined */}
+              <div className="text-[13px] text-gray-600">{m.joined_at ? formatJoined(m.joined_at) : '—'}</div>
+
+              {/* Channel access */}
+              <div>
+                {m.role === 'owner'
+                  ? <span className="text-[13px] text-gray-600">All channels</span>
+                  : <button className="text-[13px] text-[#4d298c] hover:underline">Manage →</button>
+                }
+              </div>
+
+              {/* Actions */}
+              <div>
+                {!isCurrentUser && (
+                  <button className="text-[12px] text-gray-400 hover:text-red-500 transition-colors">Remove</button>
+                )}
+              </div>
             </div>
-            <div className="min-w-0">
-              <div className="text-[13px] font-medium text-[#111827] truncate">{displayName || email}</div>
-              <div className="text-[11px] text-gray-400 truncate">{email}</div>
-            </div>
-          </div>
-          {/* Role */}
-          <div>
-            <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-[#fef3c7] text-[#92400e]">
-              Owner
-            </span>
-          </div>
-          {/* Status */}
-          <div className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: '#d7f78b' }} />
-            <span className="text-[13px] text-gray-600">Active</span>
-          </div>
-          {/* Joined */}
-          <div className="text-[13px] text-gray-600">{joinedDate}</div>
-          {/* Channel access */}
-          <div className="text-[13px] text-gray-600">All channels</div>
-          {/* Actions */}
-          <div />
-        </div>
+          );
+        })}
       </div>
 
       {/* Footer */}
       <div className="mt-4">
-        <span className="text-[12px] text-gray-400">1 member</span>
+        <span className="text-[12px] text-gray-400">
+          {members.length} member{members.length !== 1 ? 's' : ''}
+        </span>
       </div>
     </div>
   );
