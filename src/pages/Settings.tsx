@@ -137,8 +137,8 @@ function RemoveModal({
   const name = getDisplayName(member.full_name, member.email);
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/30" onClick={onCancel} />
-      <div className="relative bg-white rounded-2xl shadow-xl px-6 py-5 w-[360px]">
+      <div className="absolute inset-0 bg-black/40" onClick={onCancel} />
+      <div className="relative bg-white rounded-xl shadow-xl p-6 w-[400px]">
         <h2 className="text-[16px] font-extrabold text-[#111827] mb-1">Remove {name}?</h2>
         <p className="text-[13px] text-gray-500 mb-5">
           They will lose access to all channels immediately.
@@ -205,18 +205,20 @@ function MembersPanel() {
       for (const p of (profilesData ?? [])) {
         profileMap[p.id] = { full_name: p.full_name, email: p.email, avatar_url: p.avatar_url };
       }
+      console.log('[MembersPanel] profileMap keys:', Object.keys(profileMap), 'membersData user_ids:', membersData.map(r => r.user_id));
 
       const mapped: Member[] = membersData.map(row => {
         const profile = profileMap[row.user_id];
         const isCurrentUser = row.user_id === currentUserId;
+        const rawRole = (row.role ?? 'member').toLowerCase() as 'owner' | 'admin' | 'member';
         return {
           user_id: row.user_id,
-          role: row.role ?? 'member',
+          role: rawRole,
           status: 'offline' as const,
           joined_at: row.joined_at,
-          full_name: profile?.full_name ?? null,
-          email: profile?.email ?? (isCurrentUser ? (session?.user?.email ?? '') : ''),
-          avatar_url: profile?.avatar_url ?? null,
+          full_name: profile?.full_name || null,
+          email: profile?.email || (isCurrentUser ? (session?.user?.email ?? '') : ''),
+          avatar_url: profile?.avatar_url || null,
         };
       });
 
@@ -227,6 +229,7 @@ function MembersPanel() {
       });
 
       setMembers(mapped);
+      console.log('[MembersPanel] mapped members:', mapped);
       setLoading(false);
     }
     fetchMembers();
