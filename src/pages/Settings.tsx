@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import {
   ArrowLeft, Home, Users, Shield, Hash, User, Bell, Trash2,
-  Search, Link, UserPlus, CheckCircle, XCircle,
+  Search, Link, UserPlus, CheckCircle, XCircle, X,
 } from 'lucide-react';
 import { useAuth } from '@/lib/AuthContext';
 import { supabase } from '@/lib/supabase';
@@ -164,6 +164,190 @@ function RemoveModal({
   );
 }
 
+// ─── InviteModal ──────────────────────────────────────────────────────────────
+
+type InviteTab = 'email' | 'link';
+type InviteRole = 'admin' | 'member';
+
+function InviteModal({
+  onClose,
+  onInvited,
+}: {
+  onClose: () => void;
+  onInvited?: (emails: string[]) => void;
+}) {
+  const { session } = useAuth();
+  const [tab, setTab] = useState<InviteTab>('email');
+  const [emailInput, setEmailInput] = useState('');
+  const [role, setRole] = useState<InviteRole>('member');
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState('');
+  const [copiedLink, setCopiedLink] = useState(false);
+
+  const handleSend = async () => {
+    const emails = emailInput
+      .split(',')
+      .map(e => e.trim())
+      .filter(e => e.length > 0);
+
+    if (emails.length === 0) {
+      setError('Enter at least one email address.');
+      return;
+    }
+
+    setSending(true);
+    setError('');
+
+    const rows = emails.map(email => ({
+      email,
+      role,
+      invited_by: session?.user?.id ?? null,
+      token: crypto.randomUUID(),
+      expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+    }));
+
+    const { error: dbError } = await supabase.from('workspace_invites').insert(rows);
+
+    setSending(false);
+
+    if (dbError) {
+      setError('Failed to send invites. Try again.');
+    } else {
+      setSent(true);
+      onInvited?.(emails);
+    }
+  };
+
+  const handleCopyLink = () => {
+    navigator.clipboard.writeText('flowtalk.com/join/abc123');
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2000);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative bg-white rounded-xl shadow-xl p-6 w-[480px]">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-[16px] font-extrabold text-[#111827]">Invite members</h2>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 transition-all duration-150"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex border-b border-[#E5E7EB] mb-5">
+          {(['email', 'link'] as InviteTab[]).map(t => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`pb-2 mr-5 text-[13px] transition-all duration-150 ${
+                tab === t
+                  ? 'border-b-2 border-[#4d298c] text-[#4d298c] font-semibold'
+                  : 'text-gray-400 hover:text-gray-600'
+              }`}
+            >
+              {t === 'email' ? 'Email invite' : 'Invite link'}
+            </button>
+          ))}
+        </div>
+
+        {/* Email tab */}
+        {tab === 'email' && (
+          <div className="flex flex-col gap-4">
+            {sent ? (
+              <div className="flex flex-col items-center py-6 gap-2">
+                <CheckCircle size={32} className="text-green-500" />
+                <p className="text-[14px] font-semibold text-[#111827]">Invites sent!</p>
+                <p className="text-[12px] text-gray-500">
+                  Recipients will get an email with a join link.
+                </p>
+                <button
+                  onClick={onClose}
+                  className="mt-3 px-5 py-2 bg-[#4d298c] text-white text-[13px] font-medium rounded-lg hover:bg-[#3d1f70] transition-all duration-150"
+                >
+                  Done
+                </button>
+              </div>
+            ) : (
+              <>
+                <textarea
+                  value={emailInput}
+                  onChange={e => { setEmailInput(e.target.value); setError(''); }}
+                  placeholder="Enter email addresses, separated by commas"
+                  className="border border-[#E5E7EB] rounded-lg p-3 text-[13px] text-[#111827] placeholder-gray-400 w-full h-24 resize-none outline-none focus:border-[#4d298c] transition-colors"
+                />
+
+                {/* Role selection */}
+                <div className="flex gap-3">
+                  {([
+                    { value: 'admin' as InviteRole, label: 'Admin', desc: 'Can manage members and channels' },
+                    { value: 'member' as InviteRole, label: 'Member', desc: 'Can view and send messages' },
+                  ]).map(opt => (
+                    <button
+                      key={opt.value}
+                      onClick={() => setRole(opt.value)}
+                      className={`flex-1 text-left border rounded-lg p-3 transition-all duration-150 ${
+                        role === opt.value
+                          ? 'border-[#4d298c] bg-[#f5f0ff]'
+                          : 'border-[#E5E7EB] hover:border-gray-300 bg-white'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <span
+                          className={`w-3.5 h-3.5 rounded-full border-2 shrink-0 ${
+                            role === opt.value ? 'border-[#4d298c] bg-[#4d298c]' : 'border-gray-300'
+                          }`}
+                        />
+                        <span className="text-[13px] font-semibold text-[#111827]">{opt.label}</span>
+                      </div>
+                      <p className="text-[11px] text-gray-500 pl-5">{opt.desc}</p>
+                    </button>
+                  ))}
+                </div>
+
+                {error && <p className="text-[12px] text-red-500">{error}</p>}
+
+                <button
+                  onClick={handleSend}
+                  disabled={sending}
+                  className="w-full py-2.5 bg-[#4d298c] text-white text-[13px] font-semibold rounded-lg hover:bg-[#3d1f70] transition-all duration-150 disabled:opacity-60"
+                >
+                  {sending ? 'Sending…' : 'Send invites'}
+                </button>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Link tab */}
+        {tab === 'link' && (
+          <div className="flex flex-col gap-4">
+            <p className="text-[13px] text-gray-500">
+              Share this link with anyone you want to invite to the workspace.
+            </p>
+            <div className="flex items-center gap-2 border border-[#E5E7EB] rounded-lg px-3 py-2.5 bg-[#F7F8FA]">
+              <span className="text-[13px] text-gray-600 flex-1 truncate">flowtalk.com/join/abc123</span>
+              <button
+                onClick={handleCopyLink}
+                className="flex items-center gap-1.5 text-[12px] font-medium text-[#4d298c] hover:underline shrink-0 transition-all duration-150"
+              >
+                <Link size={13} />
+                {copiedLink ? 'Copied!' : 'Copy'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── MembersPanel ─────────────────────────────────────────────────────────────
 
 function MembersPanel() {
@@ -175,6 +359,7 @@ function MembersPanel() {
   const [toast, setToast] = useState<ToastState | null>(null);
   const [removeTarget, setRemoveTarget] = useState<Member | null>(null);
   const [removing, setRemoving] = useState(false);
+  const [showInvite, setShowInvite] = useState(false);
 
   const currentUserId = session?.user?.id;
 
@@ -307,7 +492,10 @@ function MembersPanel() {
           <Link size={14} className="text-gray-500 shrink-0" />
           {copiedInvite ? 'Copied!' : 'Copy invite link'}
         </button>
-        <button className="flex items-center gap-2 px-3 py-2 bg-[#4d298c] text-white rounded-lg text-[13px] font-medium hover:bg-[#3d1f70] transition-all duration-150 shrink-0">
+        <button
+          onClick={() => setShowInvite(true)}
+          className="flex items-center gap-2 px-3 py-2 bg-[#4d298c] text-white rounded-lg text-[13px] font-medium hover:bg-[#3d1f70] transition-all duration-150 shrink-0"
+        >
           <UserPlus size={14} className="shrink-0" />
           Invite members
         </button>
@@ -434,6 +622,11 @@ function MembersPanel() {
           onCancel={() => setRemoveTarget(null)}
           onConfirm={confirmRemove}
         />
+      )}
+
+      {/* Invite modal */}
+      {showInvite && (
+        <InviteModal onClose={() => setShowInvite(false)} />
       )}
     </div>
   );
