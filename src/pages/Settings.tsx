@@ -474,6 +474,118 @@ function InviteModal({
   );
 }
 
+// ─── ChannelVisibilityPanel ───────────────────────────────────────────────────
+
+type Channel = {
+  id: string;
+  name: string;
+  category: string | null;
+};
+
+function ChannelVisibilityPanel({ member, onClose }: { member: Member; onClose: () => void }) {
+  const [visible, setVisible] = useState(false);
+  const [channels, setChannels] = useState<Channel[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // Slide in after mount
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => setVisible(true));
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  useEffect(() => {
+    async function fetchData() {
+      setLoading(true);
+      const { data: channelRows } = await supabase
+        .from('channels')
+        .select('id, name, category')
+        .order('name');
+      setChannels(channelRows ?? []);
+      setLoading(false);
+    }
+    fetchData();
+  }, [member.user_id]);
+
+  const handleClose = () => {
+    setVisible(false);
+    setTimeout(onClose, 200);
+  };
+
+  // Group channels by category
+  const grouped = (channels).reduce<Record<string, Channel[]>>((acc, ch) => {
+    const cat = ch.category ?? 'General';
+    if (!acc[cat]) acc[cat] = [];
+    acc[cat].push(ch);
+    return acc;
+  }, {});
+  const categories = Object.keys(grouped).sort();
+
+  const initials = getInitials(member.full_name, member.email);
+  const displayName = getDisplayName(member.full_name, member.email);
+  const badgeCls = ROLE_BADGE[member.role] ?? ROLE_BADGE.member;
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div className="fixed inset-0 bg-black/20 z-40" onClick={handleClose} />
+
+      {/* Slide-in panel */}
+      <div
+        className={`fixed right-0 top-0 h-full w-[360px] bg-white shadow-2xl z-50 border-l border-[#E5E7EB] flex flex-col transition-transform duration-200 ${
+          visible ? 'translate-x-0' : 'translate-x-full'
+        }`}
+      >
+        {/* Header */}
+        <div className="px-5 py-4 border-b border-[#E5E7EB] flex items-start gap-3">
+          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-[#4d298c] to-purple-400 flex items-center justify-center shrink-0">
+            <span className="text-white text-[11px] font-bold">{initials}</span>
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-[14px] font-extrabold text-[#111827] truncate">{displayName}</div>
+            <div className="text-[11px] text-gray-400 truncate">{member.email}</div>
+            <span className={`inline-block mt-1 text-[11px] font-medium px-2 py-0.5 rounded-full ${badgeCls}`}>
+              {member.role.charAt(0).toUpperCase() + member.role.slice(1)}
+            </span>
+          </div>
+          <button onClick={handleClose} className="text-gray-400 hover:text-gray-600 transition-all duration-150 shrink-0">
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Section title */}
+        <div className="px-5 pt-4 pb-2">
+          <span className="text-[11px] font-semibold uppercase tracking-widest text-gray-400">Channel access</span>
+        </div>
+
+        {/* Channel list */}
+        <div className="flex-1 overflow-y-auto px-5 pb-5">
+          {loading ? (
+            <div className="space-y-2 pt-2">
+              {[0, 1, 2, 3, 4].map(i => (
+                <div key={i} className="h-8 rounded-lg bg-gray-100 animate-pulse" />
+              ))}
+            </div>
+          ) : channels.length === 0 ? (
+            <p className="text-[13px] text-gray-400 pt-4">No channels found.</p>
+          ) : (
+            categories.map(cat => (
+              <div key={cat} className="mb-4">
+                <div className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 mb-1.5">{cat}</div>
+                {grouped[cat].map(ch => (
+                  <div key={ch.id} className="flex items-center gap-2 py-1.5">
+                    <Hash size={13} className="text-gray-400 shrink-0" />
+                    <span className="text-[13px] text-[#111827] flex-1">{ch.name}</span>
+                  </div>
+                ))}
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
 // ─── MembersPanel ─────────────────────────────────────────────────────────────
 
 function MembersPanel() {
@@ -486,6 +598,7 @@ function MembersPanel() {
   const [removeTarget, setRemoveTarget] = useState<Member | null>(null);
   const [removing, setRemoving] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
+  const [manageTarget, setManageTarget] = useState<Member | null>(null);
 
   const currentUserId = session?.user?.id;
 
@@ -707,7 +820,7 @@ function MembersPanel() {
               <div>
                 {isOwner
                   ? <span className="text-[13px] text-gray-600">All channels</span>
-                  : <button className="text-[13px] text-[#4d298c] hover:underline">Manage →</button>
+                  : <button onClick={() => setManageTarget(m)} className="text-[13px] text-[#4d298c] hover:underline">Manage →</button>
                 }
               </div>
 
@@ -753,6 +866,11 @@ function MembersPanel() {
       {/* Invite modal */}
       {showInvite && (
         <InviteModal onClose={() => setShowInvite(false)} />
+      )}
+
+      {/* Channel visibility panel */}
+      {manageTarget && (
+        <ChannelVisibilityPanel member={manageTarget} onClose={() => setManageTarget(null)} />
       )}
     </div>
   );
