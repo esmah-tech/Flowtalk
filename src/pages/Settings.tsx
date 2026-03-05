@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import {
   ArrowLeft, Home, Users, Shield, Hash, User, Bell, Trash2,
-  Search, Link, UserPlus, CheckCircle, XCircle, X,
+  Search, Link, UserPlus, CheckCircle, XCircle, X, AlertTriangle,
 } from 'lucide-react';
 import { useAuth } from '@/lib/AuthContext';
 import { supabase } from '@/lib/supabase';
@@ -185,6 +185,9 @@ function InviteModal({
   const [error, setError] = useState('');
   const [inviteLink, setInviteLink] = useState('');
   const [linkLoading, setLinkLoading] = useState(false);
+  const [linkDisabled, setLinkDisabled] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
+  const [disabling, setDisabling] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
 
   const handleSend = async () => {
@@ -265,6 +268,34 @@ function InviteModal({
     navigator.clipboard.writeText(inviteLink);
     setCopiedLink(true);
     setTimeout(() => setCopiedLink(false), 2000);
+  };
+
+  const handleRegenerate = async () => {
+    setRegenerating(true);
+    const newToken = crypto.randomUUID();
+    const expires_at = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+
+    // Delete old link invite(s) then insert fresh one
+    await supabase.from('workspace_invites').delete().eq('email', '');
+    await supabase.from('workspace_invites').insert({
+      email: '',
+      token: newToken,
+      role: 'member',
+      invited_by: session?.user?.id ?? null,
+      expires_at,
+    });
+
+    setInviteLink(`${window.location.origin}/join/${newToken}`);
+    setLinkDisabled(false);
+    setRegenerating(false);
+  };
+
+  const handleDisable = async () => {
+    setDisabling(true);
+    await supabase.from('workspace_invites').delete().eq('email', '');
+    setInviteLink('');
+    setLinkDisabled(true);
+    setDisabling(false);
   };
 
   return (
@@ -369,26 +400,72 @@ function InviteModal({
 
         {/* Link tab */}
         {tab === 'link' && (
-          <div className="flex flex-col gap-4">
-            <p className="text-[13px] text-gray-500">
+          <div className="flex flex-col">
+            <p className="text-[13px] text-gray-500 mb-4">
               Share this link with anyone you want to invite to the workspace.
             </p>
+
             {linkLoading ? (
               <div className="h-10 rounded-lg bg-gray-100 animate-pulse" />
-            ) : (
-              <div className="flex items-center gap-2">
-                <input
-                  readOnly
-                  value={inviteLink}
-                  className="flex-1 border border-[#E5E7EB] rounded-lg px-3 py-2 text-[13px] bg-[#F7F8FA] text-gray-600 outline-none truncate"
-                />
+            ) : linkDisabled ? (
+              /* Disabled empty state */
+              <div className="flex flex-col items-center py-6 gap-2 text-center">
+                <p className="text-[14px] font-semibold text-[#111827]">Invite link disabled</p>
+                <p className="text-[12px] text-gray-500">No one can join via link right now.</p>
                 <button
-                  onClick={handleCopyLink}
-                  className="shrink-0 px-3 py-2 bg-[#4d298c] text-white text-[13px] font-medium rounded-lg hover:bg-[#3d1f70] transition-all duration-150"
+                  onClick={handleRegenerate}
+                  disabled={regenerating}
+                  className="mt-3 px-4 py-2 bg-[#4d298c] text-white text-[13px] font-medium rounded-lg hover:bg-[#3d1f70] transition-all duration-150 disabled:opacity-60"
                 >
-                  {copiedLink ? 'Copied!' : 'Copy link'}
+                  {regenerating ? 'Generating…' : 'Generate new link'}
                 </button>
               </div>
+            ) : (
+              <>
+                {/* Link input + copy */}
+                <div className="flex items-center gap-2">
+                  <input
+                    readOnly
+                    value={inviteLink}
+                    className="flex-1 border border-[#E5E7EB] rounded-lg px-3 py-2 text-[13px] bg-[#F7F8FA] text-gray-600 outline-none truncate"
+                  />
+                  <button
+                    onClick={handleCopyLink}
+                    className="shrink-0 px-3 py-2 bg-[#4d298c] text-white text-[13px] font-medium rounded-lg hover:bg-[#3d1f70] transition-all duration-150"
+                  >
+                    {copiedLink ? 'Copied!' : 'Copy link'}
+                  </button>
+                </div>
+
+                {/* Expiry note */}
+                <p className="text-[12px] text-gray-400 mt-2">
+                  Link expires in 7 days · Anyone with this link joins as Member
+                </p>
+
+                {/* Warning box */}
+                <div className="flex items-center gap-2 bg-[#fffbeb] border border-[#fcd34d] rounded-lg p-3 mt-3">
+                  <AlertTriangle size={15} className="text-amber-600 shrink-0" />
+                  <span className="text-[13px] text-amber-700">Only share with people you trust</span>
+                </div>
+
+                {/* Action buttons */}
+                <div className="flex gap-2 mt-4">
+                  <button
+                    onClick={handleRegenerate}
+                    disabled={regenerating || disabling}
+                    className="flex-1 py-2 border border-[#E5E7EB] text-[13px] text-gray-700 rounded-lg hover:bg-[#F7F8FA] transition-all duration-150 disabled:opacity-60"
+                  >
+                    {regenerating ? 'Regenerating…' : 'Regenerate link'}
+                  </button>
+                  <button
+                    onClick={handleDisable}
+                    disabled={disabling || regenerating}
+                    className="flex-1 py-2 border border-red-200 text-[13px] text-red-600 rounded-lg hover:bg-red-50 transition-all duration-150 disabled:opacity-60"
+                  >
+                    {disabling ? 'Disabling…' : 'Disable link'}
+                  </button>
+                </div>
+              </>
             )}
           </div>
         )}
