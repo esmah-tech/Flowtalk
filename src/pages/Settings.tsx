@@ -483,8 +483,12 @@ type Channel = {
 };
 
 function ChannelVisibilityPanel({ member, onClose }: { member: Member; onClose: () => void }) {
+  const { session } = useAuth();
   const [visible, setVisible] = useState(false);
   const [channels, setChannels] = useState<Channel[]>([]);
+  // canView[channelId] = true means visible (default), false means hidden
+  const [canView, setCanView] = useState<Record<string, boolean>>({});
+  const [saving, setSaving] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
 
   // Slide in after mount
@@ -496,11 +500,20 @@ function ChannelVisibilityPanel({ member, onClose }: { member: Member; onClose: 
   useEffect(() => {
     async function fetchData() {
       setLoading(true);
-      const { data: channelRows } = await supabase
-        .from('channels')
-        .select('id, name, category')
-        .order('name');
+
+      const [{ data: channelRows }, { data: visRows }] = await Promise.all([
+        supabase.from('channels').select('id, name, category').order('name'),
+        supabase.from('channel_visibility').select('channel_id, can_view').eq('user_id', member.user_id),
+      ]);
+
       setChannels(channelRows ?? []);
+
+      // Build canView map — default true, override with DB rows
+      const map: Record<string, boolean> = {};
+      for (const ch of (channelRows ?? [])) map[ch.id] = true;
+      for (const row of (visRows ?? [])) map[row.channel_id] = row.can_view;
+      setCanView(map);
+
       setLoading(false);
     }
     fetchData();
@@ -511,8 +524,28 @@ function ChannelVisibilityPanel({ member, onClose }: { member: Member; onClose: 
     setTimeout(onClose, 200);
   };
 
+  const handleToggle = async (channelId: string) => {
+    const newValue = !canView[channelId];
+    setCanView(prev => ({ ...prev, [channelId]: newValue }));
+    setSaving(prev => ({ ...prev, [channelId]: true }));
+
+    await supabase.from('channel_visibility').upsert(
+      {
+        channel_id: channelId,
+        user_id: member.user_id,
+        can_view: newValue,
+        can_write: newValue,
+        set_by: session?.user?.id ?? null,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'channel_id,user_id' }
+    );
+
+    setSaving(prev => ({ ...prev, [channelId]: false }));
+  };
+
   // Group channels by category
-  const grouped = (channels).reduce<Record<string, Channel[]>>((acc, ch) => {
+  const grouped = channels.reduce<Record<string, Channel[]>>((acc, ch) => {
     const cat = ch.category ?? 'General';
     if (!acc[cat]) acc[cat] = [];
     acc[cat].push(ch);
@@ -558,7 +591,7 @@ function ChannelVisibilityPanel({ member, onClose }: { member: Member; onClose: 
         </div>
 
         {/* Channel list */}
-        <div className="flex-1 overflow-y-auto px-5 pb-5">
+        <div className="flex-1 overflow-y-auto px-5 pb-2">
           {loading ? (
             <div className="space-y-2 pt-2">
               {[0, 1, 2, 3, 4].map(i => (
@@ -571,15 +604,38 @@ function ChannelVisibilityPanel({ member, onClose }: { member: Member; onClose: 
             categories.map(cat => (
               <div key={cat} className="mb-4">
                 <div className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 mb-1.5">{cat}</div>
-                {grouped[cat].map(ch => (
-                  <div key={ch.id} className="flex items-center gap-2 py-1.5">
-                    <Hash size={13} className="text-gray-400 shrink-0" />
-                    <span className="text-[13px] text-[#111827] flex-1">{ch.name}</span>
-                  </div>
-                ))}
+                {grouped[cat].map(ch => {
+                  const on = canView[ch.id] !== false;
+                  const isSaving = saving[ch.id] ?? false;
+                  return (
+                    <div key={ch.id} className="flex items-center gap-2 py-1.5">
+                      <Hash size={13} className="text-gray-400 shrink-0" />
+                      <span className="text-[13px] text-[#111827] flex-1">{ch.name}</span>
+                      {/* Toggle switch */}
+                      <button
+                        onClick={() => handleToggle(ch.id)}
+                        disabled={isSaving}
+                        className={`relative w-9 h-5 rounded-full transition-all duration-150 shrink-0 ${
+                          on ? 'bg-[#4d298c]' : 'bg-[#E5E7EB]'
+                        } ${isSaving ? 'opacity-50' : ''}`}
+                      >
+                        <span
+                          className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all duration-150 ${
+                            on ? 'left-[calc(100%-18px)]' : 'left-0.5'
+                          }`}
+                        />
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             ))
           )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-4 py-3 border-t border-[#E5E7EB] shrink-0">
+          <span className="text-[12px] text-gray-400">Changes apply immediately</span>
         </div>
       </div>
     </>
