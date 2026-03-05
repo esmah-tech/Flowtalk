@@ -183,6 +183,8 @@ function InviteModal({
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState('');
+  const [inviteLink, setInviteLink] = useState('');
+  const [linkLoading, setLinkLoading] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
 
   const handleSend = async () => {
@@ -219,8 +221,48 @@ function InviteModal({
     }
   };
 
+  // Load or create a link invite token when the link tab is opened
+  useEffect(() => {
+    if (tab !== 'link') return;
+    if (inviteLink) return; // already loaded
+
+    async function loadLinkToken() {
+      setLinkLoading(true);
+      const now = new Date().toISOString();
+
+      // Look for an existing non-expired link invite (email = '')
+      const { data: existing } = await supabase
+        .from('workspace_invites')
+        .select('token')
+        .eq('email', '')
+        .is('accepted_at', null)
+        .gt('expires_at', now)
+        .limit(1)
+        .maybeSingle();
+
+      let token: string;
+      if (existing?.token) {
+        token = existing.token;
+      } else {
+        token = crypto.randomUUID();
+        await supabase.from('workspace_invites').insert({
+          email: '',
+          token,
+          role: 'member',
+          invited_by: session?.user?.id ?? null,
+          expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+        });
+      }
+
+      setInviteLink(`${window.location.origin}/join/${token}`);
+      setLinkLoading(false);
+    }
+
+    loadLinkToken();
+  }, [tab, inviteLink, session]);
+
   const handleCopyLink = () => {
-    navigator.clipboard.writeText('flowtalk.com/join/abc123');
+    navigator.clipboard.writeText(inviteLink);
     setCopiedLink(true);
     setTimeout(() => setCopiedLink(false), 2000);
   };
@@ -331,16 +373,23 @@ function InviteModal({
             <p className="text-[13px] text-gray-500">
               Share this link with anyone you want to invite to the workspace.
             </p>
-            <div className="flex items-center gap-2 border border-[#E5E7EB] rounded-lg px-3 py-2.5 bg-[#F7F8FA]">
-              <span className="text-[13px] text-gray-600 flex-1 truncate">flowtalk.com/join/abc123</span>
-              <button
-                onClick={handleCopyLink}
-                className="flex items-center gap-1.5 text-[12px] font-medium text-[#4d298c] hover:underline shrink-0 transition-all duration-150"
-              >
-                <Link size={13} />
-                {copiedLink ? 'Copied!' : 'Copy'}
-              </button>
-            </div>
+            {linkLoading ? (
+              <div className="h-10 rounded-lg bg-gray-100 animate-pulse" />
+            ) : (
+              <div className="flex items-center gap-2">
+                <input
+                  readOnly
+                  value={inviteLink}
+                  className="flex-1 border border-[#E5E7EB] rounded-lg px-3 py-2 text-[13px] bg-[#F7F8FA] text-gray-600 outline-none truncate"
+                />
+                <button
+                  onClick={handleCopyLink}
+                  className="shrink-0 px-3 py-2 bg-[#4d298c] text-white text-[13px] font-medium rounded-lg hover:bg-[#3d1f70] transition-all duration-150"
+                >
+                  {copiedLink ? 'Copied!' : 'Copy link'}
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
