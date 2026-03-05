@@ -154,7 +154,7 @@ function RemoveModal({
           <button
             onClick={onConfirm}
             disabled={removing}
-            className="px-4 py-2 text-[13px] text-white bg-red-500 rounded-lg font-medium hover:bg-red-600 transition-all duration-150 disabled:opacity-60"
+            className="px-4 py-2 text-[13px] text-white bg-red-600 rounded-lg font-medium hover:bg-red-700 transition-all duration-150 disabled:opacity-60"
           >
             {removing ? 'Removing…' : 'Remove member'}
           </button>
