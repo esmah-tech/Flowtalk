@@ -1,4 +1,4 @@
-import { Hash, Users, Search, MoreHorizontal, Settings, Smile, Paperclip, AtSign, Send, Mic, Square, Inbox } from 'lucide-react';
+import { Hash, Users, Search, MoreHorizontal, Settings, Smile, Paperclip, AtSign, Send, Mic, Square, Inbox, MessageSquare, SmilePlus } from 'lucide-react';
 import React, { useState, useEffect, useCallback } from 'react';
 import { SearchModal } from './SearchModal';
 import type { DMProfile } from '../App';
@@ -304,10 +304,10 @@ export function ChatArea({
                     <div className="bg-gray-100 rounded-2xl rounded-tl-sm px-3 py-2 text-[14px] text-gray-800 max-w-xs">{msg.text}</div>
                     <div className="text-[11px] text-gray-400 mt-1 ml-1">{msg.time}</div>
                   </div>
-                  <div className="absolute right-0 -top-3 hidden group-hover:flex items-center gap-0.5 bg-white border border-gray-200 rounded-lg shadow-sm px-1 py-0.5 z-10">
-                    <button className="p-1.5 hover:bg-purple-50 rounded text-[13px]" title="React">👍</button>
-                    <button className="p-1.5 hover:bg-purple-50 rounded text-[13px]" title="Reply">↩️</button>
-                    <button className="p-1.5 hover:bg-purple-50 rounded" title="More options"><MoreHorizontal size={14} className="text-gray-500" /></button>
+                  <div className="absolute right-0 -top-3 opacity-0 group-hover:opacity-100 transition-all duration-150 bg-white border border-[#E5E7EB] rounded-lg shadow-sm flex items-center gap-1 px-1 py-1 z-10">
+                    <button title="Reply" className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><MessageSquare size={15} /></button>
+                    <button title="React" className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><SmilePlus size={15} /></button>
+                    <button title="More" className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><MoreHorizontal size={15} /></button>
                   </div>
                 </div>
               ) : (
@@ -316,10 +316,10 @@ export function ChatArea({
                     <div className="bg-[#4d298c] text-white rounded-2xl rounded-tr-sm px-3 py-2 text-[14px] max-w-xs">{msg.text}</div>
                     <div className="text-[11px] text-gray-400 mt-1 text-right">{msg.time}</div>
                   </div>
-                  <div className="absolute left-0 -top-3 hidden group-hover:flex items-center gap-0.5 bg-white border border-gray-200 rounded-lg shadow-sm px-1 py-0.5 z-10">
-                    <button className="p-1.5 hover:bg-purple-50 rounded text-[13px]" title="React">👍</button>
-                    <button className="p-1.5 hover:bg-purple-50 rounded text-[13px]" title="Reply">↩️</button>
-                    <button className="p-1.5 hover:bg-purple-50 rounded" title="More options"><MoreHorizontal size={14} className="text-gray-500" /></button>
+                  <div className="absolute left-0 -top-3 opacity-0 group-hover:opacity-100 transition-all duration-150 bg-white border border-[#E5E7EB] rounded-lg shadow-sm flex items-center gap-1 px-1 py-1 z-10">
+                    <button title="Reply" className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><MessageSquare size={15} /></button>
+                    <button title="React" className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><SmilePlus size={15} /></button>
+                    <button title="More" className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><MoreHorizontal size={15} /></button>
                   </div>
                 </div>
               )
@@ -369,10 +369,10 @@ export function ChatArea({
                     <div className="bg-[#4d298c] text-white rounded-2xl rounded-tr-sm px-3 py-2 text-[14px] max-w-xs">{msg.content}</div>
                     <div className="text-[11px] text-gray-400 mt-1 text-right">{formatTime(msg.created_at)}</div>
                   </div>
-                  <div className="absolute left-0 -top-3 hidden group-hover:flex items-center gap-0.5 bg-white border border-gray-200 rounded-lg shadow-sm px-1 py-0.5 z-10">
-                    <button className="p-1.5 hover:bg-purple-50 rounded text-[13px]" title="React">👍</button>
-                    <button className="p-1.5 hover:bg-purple-50 rounded text-[13px]" title="Reply">↩️</button>
-                    <button className="p-1.5 hover:bg-purple-50 rounded" title="More options"><MoreHorizontal size={14} className="text-gray-500" /></button>
+                  <div className="absolute left-0 -top-3 opacity-0 group-hover:opacity-100 transition-all duration-150 bg-white border border-[#E5E7EB] rounded-lg shadow-sm flex items-center gap-1 px-1 py-1 z-10">
+                    <button title="Reply" className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><MessageSquare size={15} /></button>
+                    <button title="React" className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><SmilePlus size={15} /></button>
+                    <button title="More" className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><MoreHorizontal size={15} /></button>
                   </div>
                 </div>
               ) : (
@@ -400,10 +400,10 @@ export function ChatArea({
                     </div>
                     <div className="text-[14px] text-gray-800 leading-relaxed">{msg.content}</div>
                   </div>
-                  <div className="absolute right-0 -top-3 hidden group-hover:flex items-center gap-0.5 bg-white border border-gray-200 rounded-lg shadow-sm px-1 py-0.5 z-10">
-                    <button className="p-1.5 hover:bg-purple-50 rounded text-[13px]" title="React">👍</button>
-                    <button className="p-1.5 hover:bg-purple-50 rounded text-[13px]" title="Reply">↩️</button>
-                    <button className="p-1.5 hover:bg-purple-50 rounded" title="More options"><MoreHorizontal size={14} className="text-gray-500" /></button>
+                  <div className="absolute right-0 -top-3 opacity-0 group-hover:opacity-100 transition-all duration-150 bg-white border border-[#E5E7EB] rounded-lg shadow-sm flex items-center gap-1 px-1 py-1 z-10">
+                    <button title="Reply" className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><MessageSquare size={15} /></button>
+                    <button title="React" className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><SmilePlus size={15} /></button>
+                    <button title="More" className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><MoreHorizontal size={15} /></button>
                   </div>
                 </div>
               );
