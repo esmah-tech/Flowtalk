@@ -19,6 +19,8 @@ type DbMessage = {
   content: string;
   user_id: string;
   created_at: string;
+  reply_count: number;
+  thread_id: string | null;
 };
 
 const EMOJIS = [
@@ -57,7 +59,7 @@ export function ChatArea({
     if (!selectedChannelId) return;
     const { data } = await supabase
       .from('messages')
-      .select('id, content, user_id, created_at')
+      .select('id, content, user_id, created_at, reply_count, thread_id')
       .eq('channel_id', selectedChannelId)
       .order('created_at', { ascending: true });
     const msgs = data ?? [];
@@ -368,6 +370,11 @@ export function ChatArea({
                   <div>
                     <div className="bg-[#4d298c] text-white rounded-2xl rounded-tr-sm px-3 py-2 text-[14px] max-w-xs">{msg.content}</div>
                     <div className="text-[11px] text-gray-400 mt-1 text-right">{formatTime(msg.created_at)}</div>
+                    {msg.reply_count > 0 && (
+                      <div className="text-[12px] text-[#4d298c] font-semibold cursor-pointer hover:underline text-right mt-0.5" onClick={() => console.log(msg.id)}>
+                        {msg.reply_count} {msg.reply_count === 1 ? 'reply' : 'replies'}
+                      </div>
+                    )}
                   </div>
                   <div className="absolute left-0 -top-3 opacity-0 group-hover:opacity-100 transition-all duration-150 bg-white border border-[#E5E7EB] rounded-lg shadow-sm flex items-center gap-1 px-1 py-1 z-10">
                     <button title="Reply" className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><MessageSquare size={15} /></button>
@@ -399,6 +406,11 @@ export function ChatArea({
                       <span className="text-[12px] text-gray-500">{formatTime(msg.created_at)}</span>
                     </div>
                     <div className="text-[14px] text-gray-800 leading-relaxed">{msg.content}</div>
+                    {msg.reply_count > 0 && (
+                      <div className="text-[12px] text-[#4d298c] font-semibold cursor-pointer hover:underline mt-0.5" onClick={() => console.log(msg.id)}>
+                        {msg.reply_count} {msg.reply_count === 1 ? 'reply' : 'replies'}
+                      </div>
+                    )}
                   </div>
                   <div className="absolute right-0 -top-3 opacity-0 group-hover:opacity-100 transition-all duration-150 bg-white border border-[#E5E7EB] rounded-lg shadow-sm flex items-center gap-1 px-1 py-1 z-10">
                     <button title="Reply" className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><MessageSquare size={15} /></button>
