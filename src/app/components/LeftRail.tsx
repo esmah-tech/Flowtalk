@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Plus, Check, Video, LayoutGrid, Activity, AtSign } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { Popover, PopoverContent, PopoverTrigger } from '@/app/components/ui/popover';
 import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/lib/AuthContext';
+import { ProfileModal } from './ProfileModal';
 
 const STATUS_OPTIONS = [
   { id: 'online',  label: 'Online',          color: '#d7f78b' },
@@ -14,23 +16,22 @@ const STATUS_OPTIONS = [
 type StatusId = typeof STATUS_OPTIONS[number]['id'];
 
 export function LeftRail() {
+  const { session } = useAuth();
   const [status, setStatus] = useState<StatusId>('online');
   const [activeNav, setActiveNav] = useState<string | null>(null);
-  const [editProfileOpen, setEditProfileOpen] = useState(false);
-  const [profileName, setProfileName] = useState('Esma I.');
-  const [profileRole, setProfileRole] = useState('Product Designer');
-  const [editStatus, setEditStatus] = useState<StatusId>('online');
+  const [showProfile, setShowProfile] = useState(false);
+  const [profileName, setProfileName] = useState<string | null>(null);
+  const [profileAvatar, setProfileAvatar] = useState<string | null>(null);
   const navigate = useNavigate();
 
-  const openEditProfile = () => {
-    setEditStatus(status);
-    setEditProfileOpen(true);
-  };
-
-  const saveProfile = () => {
-    setStatus(editStatus);
-    setEditProfileOpen(false);
-  };
+  useEffect(() => {
+    if (!session?.user) return;
+    supabase.from('profiles').select('full_name, avatar_url').eq('id', session.user.id).maybeSingle()
+      .then(({ data }) => {
+        setProfileName(data?.full_name ?? null);
+        setProfileAvatar(data?.avatar_url ?? null);
+      });
+  }, [session]);
 
   return (
     <>
@@ -70,7 +71,16 @@ export function LeftRail() {
       {/* User Avatar */}
       <Popover>
         <PopoverTrigger asChild>
-          <button className="w-9 h-9 rounded-lg bg-gradient-to-br from-[#4d298c] to-purple-600 focus:outline-none focus:ring-2 focus:ring-white/30" />
+          <button className="w-9 h-9 rounded-lg overflow-hidden focus:outline-none focus:ring-2 focus:ring-white/30">
+            {profileAvatar
+              ? <img src={profileAvatar} alt="avatar" className="w-9 h-9 object-cover" />
+              : <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-[#4d298c] to-purple-600 flex items-center justify-center">
+                  <span className="text-white text-[12px] font-bold">
+                    {(profileName ?? session?.user?.email ?? '').slice(0, 2).toUpperCase()}
+                  </span>
+                </div>
+            }
+          </button>
         </PopoverTrigger>
 
         <PopoverContent side="top" align="start" sideOffset={8}
@@ -78,10 +88,20 @@ export function LeftRail() {
 
           {/* Profile header */}
           <div className="p-4 flex flex-col items-center border-b border-gray-100">
-            <div className="w-16 h-16 rounded-full bg-gradient-to-br from-[#4d298c] to-purple-600 mb-3" />
-            <div className="font-semibold text-[16px] text-gray-900">Esma I.</div>
-            <div className="text-[13px] text-gray-500 mt-0.5">Product Designer</div>
-            <div className="text-[12px] text-gray-400 mt-0.5">esma@flowtalk.com</div>
+            <div className="w-16 h-16 rounded-full overflow-hidden mb-3">
+              {profileAvatar
+                ? <img src={profileAvatar} alt="avatar" className="w-16 h-16 object-cover" />
+                : <div className="w-16 h-16 rounded-full bg-gradient-to-br from-[#4d298c] to-purple-600 flex items-center justify-center">
+                    <span className="text-white text-[18px] font-bold">
+                      {(profileName ?? session?.user?.email ?? '').slice(0, 2).toUpperCase()}
+                    </span>
+                  </div>
+              }
+            </div>
+            <div className="font-semibold text-[16px] text-gray-900">
+              {profileName || session?.user?.email?.split('@')[0] || ''}
+            </div>
+            <div className="text-[12px] text-gray-400 mt-0.5">{session?.user?.email ?? ''}</div>
           </div>
 
           {/* Status selector */}
@@ -106,7 +126,7 @@ export function LeftRail() {
               Start Google Meet
             </button>
             <button
-              onClick={openEditProfile}
+              onClick={() => setShowProfile(true)}
               className="w-full py-2.5 rounded-lg font-semibold text-[13px] text-white"
               style={{ backgroundColor: '#111827' }}>
               Edit Profile
@@ -122,59 +142,14 @@ export function LeftRail() {
       </Popover>
     </div>
 
-    {/* Edit Profile Modal */}
-    {editProfileOpen && (
-      <div
-        className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center"
-        onClick={() => setEditProfileOpen(false)}
-      >
-        <div
-          className="bg-white rounded-xl shadow-xl w-80 p-6"
-          onClick={e => e.stopPropagation()}
-        >
-          <h2 className="text-[16px] font-bold text-gray-900 mb-4">Edit Profile</h2>
-          <div className="space-y-4">
-            <div>
-              <label className="text-[12px] font-medium text-gray-700 block mb-1">Name</label>
-              <input
-                value={profileName}
-                onChange={e => setProfileName(e.target.value)}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-[14px] outline-none focus:border-[#4d298c] focus:ring-2 focus:ring-purple-100"
-              />
-            </div>
-            <div>
-              <label className="text-[12px] font-medium text-gray-700 block mb-1">Role</label>
-              <input
-                value={profileRole}
-                onChange={e => setProfileRole(e.target.value)}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-[14px] outline-none focus:border-[#4d298c] focus:ring-2 focus:ring-purple-100"
-              />
-            </div>
-            <div>
-              <label className="text-[12px] font-medium text-gray-700 block mb-2">Status</label>
-              <div className="space-y-1">
-                {STATUS_OPTIONS.map(opt => (
-                  <button
-                    key={opt.id}
-                    onClick={() => setEditStatus(opt.id)}
-                    className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-50 text-[13px] text-gray-700"
-                  >
-                    <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: opt.color }} />
-                    <span className="flex-1 text-left">{opt.label}</span>
-                    {editStatus === opt.id && <Check size={14} className="text-[#4d298c]" />}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-          <button
-            onClick={saveProfile}
-            className="w-full mt-5 py-2.5 bg-[#4d298c] text-white rounded-lg font-semibold text-[13px] hover:bg-[#3d1f70]"
-          >
-            Save
-          </button>
-        </div>
-      </div>
+    {showProfile && (
+      <ProfileModal
+        initialName={profileName}
+        initialAvatar={profileAvatar}
+        email={session?.user?.email ?? ''}
+        onClose={() => setShowProfile(false)}
+        onSaved={(name, avatar) => { setProfileName(name); setProfileAvatar(avatar); setShowProfile(false); }}
+      />
     )}
     </>
   );

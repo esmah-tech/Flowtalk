@@ -42,6 +42,7 @@ export function ChatArea({
   const [messageInput,        setMessageInput]        = useState('');
   const [sentMessages,        setSentMessages]        = useState<SentMessage[]>([]);
   const [dbMessages,          setDbMessages]          = useState<DbMessage[]>([]);
+  const [senderProfiles,      setSenderProfiles]      = useState<Record<string, { full_name: string | null; avatar_url: string | null }>>({});
   const [settingsOpen,        setSettingsOpen]        = useState(false);
   const [channelName,         setChannelName]         = useState('');
   const [renameInput,         setRenameInput]         = useState('');
@@ -59,7 +60,20 @@ export function ChatArea({
       .select('id, content, user_id, created_at')
       .eq('channel_id', selectedChannelId)
       .order('created_at', { ascending: true });
-    setDbMessages(data ?? []);
+    const msgs = data ?? [];
+    setDbMessages(msgs);
+
+    // Fetch profiles for unique senders (excluding current user — we already know them)
+    const uniqueIds = [...new Set(msgs.map(m => m.user_id))];
+    if (uniqueIds.length > 0) {
+      const { data: profiles } = await supabase
+        .from('profiles')
+        .select('id, full_name, avatar_url')
+        .in('id', uniqueIds);
+      const map: Record<string, { full_name: string | null; avatar_url: string | null }> = {};
+      for (const p of (profiles ?? [])) map[p.id] = { full_name: p.full_name, avatar_url: p.avatar_url };
+      setSenderProfiles(map);
+    }
   }, [selectedChannelId]);
 
   useEffect(() => {
@@ -363,10 +377,25 @@ export function ChatArea({
                 </div>
               ) : (
                 <div key={msg.id} className="flex gap-3 relative group">
-                  <div className="w-9 h-9 rounded bg-gradient-to-br from-gray-300 to-gray-400 flex-shrink-0" />
+                  {(() => {
+                    const p = senderProfiles[msg.user_id];
+                    const name = p?.full_name ?? '';
+                    const initials = name
+                      ? name.trim().split(/\s+/).length >= 2
+                        ? (name.trim().split(/\s+/)[0][0] + name.trim().split(/\s+/).slice(-1)[0][0]).toUpperCase()
+                        : name.slice(0, 2).toUpperCase()
+                      : '?';
+                    return p?.avatar_url
+                      ? <img src={p.avatar_url} alt={name} className="w-8 h-8 rounded-full object-cover flex-shrink-0" />
+                      : <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#4d298c] to-purple-400 flex items-center justify-center flex-shrink-0">
+                          <span className="text-white text-[11px] font-bold">{initials}</span>
+                        </div>;
+                  })()}
                   <div className="flex-1">
                     <div className="flex items-baseline gap-2 mb-1">
-                      <span className="font-semibold text-[14px] text-gray-900">User</span>
+                      <span className="font-semibold text-[14px] text-gray-900">
+                        {senderProfiles[msg.user_id]?.full_name || 'User'}
+                      </span>
                       <span className="text-[12px] text-gray-500">{formatTime(msg.created_at)}</span>
                     </div>
                     <div className="text-[14px] text-gray-800 leading-relaxed">{msg.content}</div>

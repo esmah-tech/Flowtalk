@@ -570,8 +570,13 @@ function ChannelVisibilityPanel({ member, onClose }: { member: Member; onClose: 
       >
         {/* Header */}
         <div className="px-5 py-4 border-b border-[#E5E7EB] flex items-start gap-3">
-          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-[#4d298c] to-purple-400 flex items-center justify-center shrink-0">
-            <span className="text-white text-[11px] font-bold">{initials}</span>
+          <div className="w-9 h-9 rounded-full shrink-0 overflow-hidden">
+            {member.avatar_url
+              ? <img src={member.avatar_url} alt={displayName} className="w-9 h-9 object-cover" />
+              : <div className="w-9 h-9 rounded-full bg-gradient-to-br from-[#4d298c] to-purple-400 flex items-center justify-center">
+                  <span className="text-white text-[11px] font-bold">{initials}</span>
+                </div>
+            }
           </div>
           <div className="flex-1 min-w-0">
             <div className="text-[14px] font-extrabold text-[#111827] truncate">{displayName}</div>
@@ -830,8 +835,13 @@ function MembersPanel() {
             >
               {/* Member */}
               <div className="flex items-center gap-3 min-w-0">
-                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#4d298c] to-purple-400 flex items-center justify-center shrink-0">
-                  <span className="text-white text-[11px] font-bold">{initials}</span>
+                <div className="w-8 h-8 rounded-full shrink-0 overflow-hidden">
+                  {m.avatar_url
+                    ? <img src={m.avatar_url} alt={displayName} className="w-8 h-8 object-cover" />
+                    : <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#4d298c] to-purple-400 flex items-center justify-center">
+                        <span className="text-white text-[11px] font-bold">{initials}</span>
+                      </div>
+                  }
                 </div>
                 <div className="min-w-0">
                   <div className="text-[13px] font-medium text-[#111827] truncate">
