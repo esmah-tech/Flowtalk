@@ -170,6 +170,8 @@ export function Sidebar({
     localStorage.setItem('flowtalk_dnd', String(next));
   };
 
+  const [userRole, setUserRole] = useState<'owner' | 'admin' | 'member' | null>(null);
+  const [hiddenChannelIds, setHiddenChannelIds] = useState<Set<string>>(new Set());
   const [unreadChannels, setUnreadChannels] = useState<Map<string, { hasMention: boolean }>>(new Map());
 
   useEffect(() => {
@@ -195,14 +197,33 @@ export function Sidebar({
     return () => { supabase.removeChannel(sub); };
   }, [selectedChannelId, mutedChannelIds]);
 
+  const currentUserId = session?.user?.id;
+
   const loadChannels = useCallback(async () => {
-    const { data } = await supabase
-      .from('channels')
-      .select('id, name, type, category, is_active')
-      .order('name');
-    setChannels(data ?? []);
+    const [{ data: channelRows }, { data: memberRow }, { data: visRows }] = await Promise.all([
+      supabase.from('channels').select('id, name, type, category, is_active').order('name'),
+      currentUserId
+        ? supabase.from('workspace_members').select('role').eq('user_id', currentUserId).maybeSingle()
+        : Promise.resolve({ data: null }),
+      currentUserId
+        ? supabase.from('channel_visibility').select('channel_id, can_view').eq('user_id', currentUserId)
+        : Promise.resolve({ data: [] }),
+    ]);
+
+    setChannels(channelRows ?? []);
+
+    const role = ((memberRow as { role?: string } | null)?.role ?? 'member').toLowerCase() as 'owner' | 'admin' | 'member';
+    setUserRole(role);
+
+    const hidden = new Set<string>(
+      ((visRows ?? []) as { channel_id: string; can_view: boolean }[])
+        .filter(r => r.can_view === false)
+        .map(r => r.channel_id)
+    );
+    setHiddenChannelIds(hidden);
+
     setLoading(false);
-  }, []);
+  }, [currentUserId]);
 
   useEffect(() => { loadChannels(); }, [loadChannels, reloadTrigger]);
 
@@ -235,9 +256,14 @@ export function Sidebar({
   const activeChannels  = channels.filter(c => c.is_active !== false);
   const inactiveChannels = channels.filter(c => c.is_active === false);
 
+  // Owners and admins see all channels; members see only non-hidden ones
+  const visibleActiveChannels = (userRole === 'owner' || userRole === 'admin')
+    ? activeChannels
+    : activeChannels.filter(c => !hiddenChannelIds.has(c.id));
+
   // Group active channels by category
   const categoryMap = new Map<string, DbChannel[]>();
-  activeChannels.forEach(c => {
+  visibleActiveChannels.forEach(c => {
     const cat = c.category ?? 'General';
     if (!categoryMap.has(cat)) categoryMap.set(cat, []);
     categoryMap.get(cat)!.push(c);
