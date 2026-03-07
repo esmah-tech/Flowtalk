@@ -740,7 +740,7 @@ export function ChatArea({
         </div>
       )}
 
-      <SearchModal isOpen={isSearchOpen} onClose={() => setIsSearchOpen(false)} />
+      <SearchModal isOpen={isSearchOpen} onClose={() => setIsSearchOpen(false)} onSelectChannel={(id) => { onSelectChannel(id); setIsSearchOpen(false); }} />
       </div>
 
       {(moreMenuMsgId !== null || reactPickerMsgId !== null) && (

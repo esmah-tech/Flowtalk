@@ -1,74 +1,198 @@
-import { X, FileText, Hash, ArrowUpRight } from 'lucide-react';
-import React, { useState, useEffect, useRef } from 'react';
+import { X, Hash, ArrowUpRight, Search } from 'lucide-react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { supabase } from '@/lib/supabase';
 
 interface SearchModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onSelectChannel: (id: string) => void;
 }
 
-type SearchResult = {
-  type: 'file' | 'person' | 'channel';
-  title: string;
-  subtitle?: string;
-  date?: string;
+type MessageResult = {
+  id: string;
+  content: string;
+  channel_id: string;
+  channel_name: string;
+  channel_type: string;
+  sender_name: string;
+  sender_avatar_url: string | null;
+  created_at: string;
 };
 
-const PERSON_GRADIENTS: Record<string, string> = {
-  'Sophia Wilson':   'from-pink-400 to-orange-400',
-  'Michael Brown':   'from-green-400 to-teal-500',
-  'Nathan Mitchell': 'from-[#4d298c] to-purple-400',
-};
+const DEFAULT_RECENT_SEARCHES = ['UI kit components', 'Diana T.', 'fonts.zip'];
 
-const allResults: SearchResult[] = [
-  { type: 'file',    title: 'fonts.zip',                           subtitle: 'Website / v3.0',               date: 'Today' },
-  { type: 'file',    title: 'responsive-design-guidelines.pdf',    subtitle: 'UI-kit design / UI-kit design', date: 'Today' },
-  { type: 'person',  title: 'Sophia Wilson',                       subtitle: 'UX/UI designer',               date: 'Today' },
-  { type: 'person',  title: 'Michael Brown',                       subtitle: 'Back-end dev',                 date: 'Yesterday' },
-  { type: 'file',    title: 'responsive-design-guidelines.pdf',    subtitle: '',                             date: 'Yesterday' },
-  { type: 'channel', title: 'Front-end',                           subtitle: '',                             date: '20 May' },
-  { type: 'person',  title: 'Nathan Mitchell',                     subtitle: 'Front-end dev',                date: '20 May' },
+function loadRecentSearches(): string[] {
+  try {
+    const s = localStorage.getItem('flowtalk_recent_searches');
+    return s ? JSON.parse(s) : DEFAULT_RECENT_SEARCHES;
+  } catch {
+    return DEFAULT_RECENT_SEARCHES;
+  }
+}
+
+function saveRecentSearch(term: string) {
+  try {
+    const prev = loadRecentSearches();
+    const next = [term, ...prev.filter(s => s !== term)].slice(0, 5);
+    localStorage.setItem('flowtalk_recent_searches', JSON.stringify(next));
+  } catch { /* ignore */ }
+}
+
+function formatDateGroup(iso: string): string {
+  const d = new Date(iso);
+  const now = new Date();
+  if (d.toDateString() === now.toDateString()) return 'Today';
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
+  return d.toLocaleDateString([], { day: 'numeric', month: 'short' });
+}
+
+function formatTime(iso: string): string {
+  const d = new Date(iso);
+  const now = new Date();
+  if (d.toDateString() === now.toDateString())
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+}
+
+function getInitials(name: string): string {
+  return name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+}
+
+function HighlightedText({ text, term }: { text: string; term: string }) {
+  if (!term.trim()) return <span>{text}</span>;
+  const regex = new RegExp(`(${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+  const parts = text.split(regex);
+  return (
+    <span>
+      {parts.map((part, i) =>
+        regex.test(part)
+          ? <mark key={i} className="bg-[#ede8f7] text-[#4d298c] rounded px-0.5">{part}</mark>
+          : <span key={i}>{part}</span>
+      )}
+    </span>
+  );
+}
+
+async function fetchResults(term: string): Promise<MessageResult[]> {
+  const query = supabase
+    .from('messages')
+    .select('id, content, channel_id, user_id, created_at')
+    .order('created_at', { ascending: false })
+    .limit(30);
+
+  if (term.trim()) {
+    query.ilike('content', `%${term}%`);
+  }
+
+  const { data: messages, error } = await query;
+  if (error || !messages || messages.length === 0) return [];
+
+  const channelIds = [...new Set(messages.map(m => m.channel_id))];
+  const userIds    = [...new Set(messages.map(m => m.user_id))];
+
+  const [{ data: channels }, { data: profiles }] = await Promise.all([
+    supabase.from('channels').select('id, name, type').in('id', channelIds),
+    supabase.from('profiles').select('id, full_name, avatar_url').in('id', userIds),
+  ]);
+
+  const channelMap = Object.fromEntries(
+    (channels ?? []).map(c => [c.id, { name: c.name, type: c.type ?? 'channel' }])
+  );
+  const profileMap = Object.fromEntries(
+    (profiles ?? []).map(p => [p.id, { name: p.full_name, avatar_url: p.avatar_url }])
+  );
+
+  return messages.map(m => ({
+    id: m.id,
+    content: m.content,
+    channel_id: m.channel_id,
+    channel_name: channelMap[m.channel_id]?.name ?? 'unknown',
+    channel_type: channelMap[m.channel_id]?.type ?? 'channel',
+    sender_name: profileMap[m.user_id]?.name ?? 'Unknown',
+    sender_avatar_url: profileMap[m.user_id]?.avatar_url ?? null,
+    created_at: m.created_at,
+  }));
+}
+
+const TABS = [
+  { id: 'all',     label: 'All results' },
+  { id: 'threads', label: 'Threads' },
+  { id: 'members', label: 'Members' },
+  { id: 'files',   label: 'Files' },
+  { id: 'dm',      label: 'Direct messages' },
+  { id: 'links',   label: 'Links' },
 ];
 
-const RECENT_SEARCHES = ['UI kit components', 'Diana T.', 'fonts.zip'];
+export function SearchModal({ isOpen, onClose, onSelectChannel }: SearchModalProps) {
+  const [searchQuery, setSearchQuery]     = useState('');
+  const [activeTab, setActiveTab]         = useState('all');
+  const [sortByType, setSortByType]       = useState(false);
+  const [results, setResults]             = useState<MessageResult[]>([]);
+  const [loading, setLoading]             = useState(false);
+  const [focusedIndex, setFocusedIndex]   = useState(-1);
+  const [recentSearches, setRecentSearches] = useState<string[]>(DEFAULT_RECENT_SEARCHES);
+  const inputRef    = useRef<HTMLInputElement>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-export function SearchModal({ isOpen, onClose }: SearchModalProps) {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState('all');
-  const [filteredResults, setFilteredResults] = useState(allResults);
-  const [focusedIndex, setFocusedIndex] = useState(-1);
-  const [sortByType, setSortByType] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (searchQuery.trim() === '') {
-      setFilteredResults(allResults);
-    } else {
-      const query = searchQuery.toLowerCase();
-      setFilteredResults(allResults.filter(r =>
-        r.title.toLowerCase().includes(query) ||
-        (r.subtitle && r.subtitle.toLowerCase().includes(query))
-      ));
-    }
+  const load = useCallback(async (term: string) => {
+    setLoading(true);
+    const data = await fetchResults(term);
+    setResults(data);
+    setLoading(false);
     setFocusedIndex(-1);
-  }, [searchQuery]);
+  }, []);
 
+  // Reset and load recent messages when modal opens
   useEffect(() => {
+    if (!isOpen) return;
+    setSearchQuery('');
+    setActiveTab('all');
     setFocusedIndex(-1);
-  }, [activeTab]);
+    setRecentSearches(loadRecentSearches());
+    load('');
+  }, [isOpen, load]);
 
-  const baseResults = activeTab === 'all'
-    ? filteredResults
-    : filteredResults.filter(r => {
-        if (activeTab === 'members') return r.type === 'person';
-        if (activeTab === 'files')   return r.type === 'file';
-        if (activeTab === 'threads') return r.type === 'channel';
-        if (activeTab === 'dm')      return r.type === 'person';
-        return false;
-      });
+  // Debounced search
+  useEffect(() => {
+    if (!isOpen) return;
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      load(searchQuery);
+      if (searchQuery.trim()) saveRecentSearch(searchQuery.trim());
+    }, 350);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [searchQuery, isOpen, load]);
 
-  const tabFilteredResults = sortByType
-    ? [...baseResults].sort((a, b) => a.type.localeCompare(b.type))
-    : baseResults;
+  // Tab change resets focus
+  useEffect(() => { setFocusedIndex(-1); }, [activeTab]);
+
+  // Filter by tab
+  const tabFiltered = (() => {
+    let base = results;
+    if (activeTab === 'threads') base = results.filter(r => r.channel_type !== 'dm');
+    else if (activeTab === 'dm') base = results.filter(r => r.channel_type === 'dm');
+    else if (activeTab === 'members' || activeTab === 'files' || activeTab === 'links') base = [];
+    if (sortByType) base = [...base].sort((a, b) => a.channel_name.localeCompare(b.channel_name));
+    return base;
+  })();
+
+  // Group by date label
+  const groupedResults = tabFiltered.reduce((acc, result) => {
+    const label = formatDateGroup(result.created_at);
+    if (!acc[label]) acc[label] = [];
+    acc[label].push(result);
+    return acc;
+  }, {} as Record<string, MessageResult[]>);
+
+  const handleSelect = (result: MessageResult) => {
+    onSelectChannel(result.channel_id);
+    onClose();
+  };
 
   useEffect(() => {
     if (!isOpen) return;
@@ -76,38 +200,23 @@ export function SearchModal({ isOpen, onClose }: SearchModalProps) {
       if (e.key === 'Escape') { onClose(); return; }
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        setFocusedIndex(i => Math.min(i + 1, tabFilteredResults.length - 1));
+        setFocusedIndex(i => Math.min(i + 1, tabFiltered.length - 1));
       }
       if (e.key === 'ArrowUp') {
         e.preventDefault();
         setFocusedIndex(i => Math.max(i - 1, 0));
       }
-      if (e.key === 'Enter' && focusedIndex >= 0) {
-        onClose();
+      if (e.key === 'Enter' && focusedIndex >= 0 && tabFiltered[focusedIndex]) {
+        handleSelect(tabFiltered[focusedIndex]);
       }
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose, tabFilteredResults.length, focusedIndex]);
+  }, [isOpen, onClose, tabFiltered, focusedIndex]);
 
   if (!isOpen) return null;
 
-  const tabs = [
-    { id: 'all',     label: 'All results' },
-    { id: 'threads', label: 'Threads' },
-    { id: 'members', label: 'Members' },
-    { id: 'files',   label: 'Files' },
-    { id: 'dm',      label: 'Direct messages' },
-    { id: 'links',   label: 'Links' },
-  ];
-
-  const groupedResults = tabFilteredResults.reduce((acc, result) => {
-    const date = result.date || 'Other';
-    if (!acc[date]) acc[date] = [];
-    acc[date].push(result);
-    return acc;
-  }, {} as Record<string, SearchResult[]>);
-
+  const isEmpty = searchQuery.trim() === '';
   let resultIndex = 0;
 
   return (
@@ -117,13 +226,14 @@ export function SearchModal({ isOpen, onClose }: SearchModalProps) {
         {/* Search Input */}
         <div className="p-4 border-b border-gray-200">
           <div className="relative">
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
             <input
               ref={inputRef}
               type="text"
               placeholder="Search in FlowTalk..."
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
-              className="w-full pl-4 pr-10 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-[14px] focus:outline-none focus:ring-2 focus:ring-[#4d298c]"
+              className="w-full pl-9 pr-10 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-[14px] focus:outline-none focus:ring-2 focus:ring-[#4d298c]"
               autoFocus
             />
             <button onClick={onClose} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 hover:bg-gray-200 rounded">
@@ -134,7 +244,7 @@ export function SearchModal({ isOpen, onClose }: SearchModalProps) {
 
         {/* Tabs */}
         <div className="flex items-center gap-6 px-4 border-b border-gray-200 overflow-x-auto">
-          {tabs.map(tab => (
+          {TABS.map(tab => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
@@ -151,7 +261,9 @@ export function SearchModal({ isOpen, onClose }: SearchModalProps) {
 
         {/* Results */}
         <div className="max-h-96 overflow-y-auto">
-          {searchQuery.trim() === '' && (
+
+          {/* Empty state: recent searches chips */}
+          {isEmpty && (
             <div className="px-4 pt-4 pb-2">
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-[13px] font-semibold text-gray-700">Recent searches</h3>
@@ -163,7 +275,7 @@ export function SearchModal({ isOpen, onClose }: SearchModalProps) {
                 </button>
               </div>
               <div className="flex flex-wrap gap-2">
-                {RECENT_SEARCHES.map(q => (
+                {recentSearches.map(q => (
                   <button
                     key={q}
                     onClick={() => setSearchQuery(q)}
@@ -176,7 +288,8 @@ export function SearchModal({ isOpen, onClose }: SearchModalProps) {
             </div>
           )}
 
-          {searchQuery.trim() !== '' && (
+          {/* Sort by type button when query is active */}
+          {!isEmpty && (
             <div className="px-4 pt-3 pb-1 flex justify-end">
               <button
                 onClick={() => setSortByType(v => !v)}
@@ -187,49 +300,72 @@ export function SearchModal({ isOpen, onClose }: SearchModalProps) {
             </div>
           )}
 
-          {Object.entries(groupedResults).map(([date, results]) => (
+          {/* Loading */}
+          {loading && (
+            <div className="px-4 py-6 text-center text-[13px] text-gray-400">Searching...</div>
+          )}
+
+          {/* No results */}
+          {!loading && tabFiltered.length === 0 && (!isEmpty || activeTab !== 'all') && (
+            <div className="p-8 text-center text-gray-500 text-[14px]">
+              {!isEmpty ? `No results for "${searchQuery}"` : 'No results in this category'}
+            </div>
+          )}
+
+          {/* Grouped results */}
+          {!loading && Object.entries(groupedResults).map(([date, group]) => (
             <div key={date} className="px-4 py-2">
               <h4 className="text-[12px] font-medium text-gray-500 mb-2">{date}</h4>
               <div className="space-y-1">
-                {results.map((result, i) => {
+                {group.map((result) => {
                   const myIndex = resultIndex++;
                   const isFocused = myIndex === focusedIndex;
                   return (
                     <button
-                      key={i}
-                      onClick={onClose}
-                      className={`w-full flex items-center gap-3 p-2 rounded text-left group transition-colors ${
+                      key={result.id}
+                      onClick={() => handleSelect(result)}
+                      className={`w-full flex items-center gap-3 p-2 rounded text-left group transition-all duration-150 ${
                         isFocused ? 'bg-purple-50 ring-1 ring-[#4d298c]/20' : 'hover:bg-gray-50'
                       }`}
                     >
-                      {result.type === 'file' && (
-                        <FileText size={16} className="text-gray-400 flex-shrink-0" />
+                      {/* Avatar */}
+                      {result.sender_avatar_url ? (
+                        <img
+                          src={result.sender_avatar_url}
+                          alt={result.sender_name}
+                          className="w-6 h-6 rounded-full flex-shrink-0 object-cover"
+                        />
+                      ) : (
+                        <div className="w-6 h-6 rounded-full bg-gradient-to-br from-[#4d298c] to-purple-400 flex items-center justify-center flex-shrink-0">
+                          <span className="text-[9px] font-semibold text-white">{getInitials(result.sender_name)}</span>
+                        </div>
                       )}
-                      {result.type === 'person' && (
-                        <div className={`w-6 h-6 rounded bg-gradient-to-br ${PERSON_GRADIENTS[result.title] ?? 'from-[#4d298c] to-purple-400'} flex-shrink-0`} />
-                      )}
-                      {result.type === 'channel' && (
-                        <Hash size={16} className="text-gray-400 flex-shrink-0" />
-                      )}
+
+                      {/* Content */}
                       <div className="flex-1 min-w-0">
-                        <div className="text-[14px] text-gray-900 truncate">{result.title}</div>
-                        {result.subtitle && (
-                          <div className="text-[12px] text-gray-500 truncate">{result.subtitle}</div>
-                        )}
+                        <div className="flex items-center gap-1.5 mb-0.5">
+                          <span className="text-[13px] font-semibold text-gray-900 truncate">{result.sender_name}</span>
+                          <span className="flex items-center gap-0.5 text-[11px] text-[#4d298c] font-medium flex-shrink-0">
+                            <Hash size={10} />{result.channel_name}
+                          </span>
+                        </div>
+                        <div className="text-[13px] text-gray-600 truncate">
+                          <HighlightedText text={result.content} term={searchQuery} />
+                        </div>
                       </div>
-                      <ArrowUpRight size={14} className={`flex-shrink-0 ${isFocused ? 'text-[#4d298c] opacity-100' : 'text-gray-400 opacity-0 group-hover:opacity-100'}`} />
+
+                      <span className="text-[11px] text-gray-400 flex-shrink-0">{formatTime(result.created_at)}</span>
+
+                      <ArrowUpRight
+                        size={14}
+                        className={`flex-shrink-0 ${isFocused ? 'text-[#4d298c] opacity-100' : 'text-gray-400 opacity-0 group-hover:opacity-100'}`}
+                      />
                     </button>
                   );
                 })}
               </div>
             </div>
           ))}
-
-          {tabFilteredResults.length === 0 && (searchQuery.trim() !== '' || activeTab !== 'all') && (
-            <div className="p-8 text-center text-gray-500 text-[14px]">
-              {searchQuery.trim() !== '' ? `No results for "${searchQuery}"` : 'No results in this category'}
-            </div>
-          )}
         </div>
 
         {/* Footer */}
