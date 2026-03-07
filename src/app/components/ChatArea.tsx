@@ -1,4 +1,4 @@
-import { Hash, Users, Search, MoreHorizontal, Settings, Smile, Paperclip, AtSign, Send, Mic, Square, Inbox, MessageSquare, SmilePlus } from 'lucide-react';
+import { Hash, Users, Search, MoreHorizontal, Settings, Smile, Paperclip, AtSign, Send, Mic, Square, Inbox, MessageSquare, SmilePlus, X } from 'lucide-react';
 import React, { useState, useEffect, useCallback } from 'react';
 import { SearchModal } from './SearchModal';
 import type { DMProfile } from '../App';
@@ -30,6 +30,7 @@ const EMOJIS = [
   '🎉','🚀','💡','🎯','🏆','🎨','👀','💬','📌','🗓️','📎','🔗',
 ];
 const MENTION_MEMBERS = ['Daniel A.', 'Emily D.', 'Sophia Wilson', 'Diana T.'];
+const QUICK_EMOJIS = ['👍', '❤️', '😂', '🔥', '👀', '🎉'];
 
 type SentMessage =
   | { kind: 'text';  text: string;     time: string }
@@ -53,7 +54,16 @@ export function ChatArea({
   const [emojiPickerOpen,     setEmojiPickerOpen]     = useState(false);
   const [mentionDropdownOpen, setMentionDropdownOpen] = useState(false);
   const [isRecording,         setIsRecording]         = useState(false);
+  const [threadMsg,           setThreadMsg]           = useState<DbMessage | null>(null);
+  const [threadReplies,       setThreadReplies]       = useState<DbMessage[]>([]);
+  const [moreMenuMsgId,       setMoreMenuMsgId]       = useState<string | null>(null);
+  const [reactPickerMsgId,    setReactPickerMsgId]    = useState<string | null>(null);
+  const [reactPickerPos,      setReactPickerPos]      = useState<{ top: number; left: number } | null>(null);
+  const [reactions,           setReactions]           = useState<Record<string, { emoji: string; count: number }[]>>({});
+  const [threadReplyInput,    setThreadReplyInput]    = useState('');
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+  const threadInputRef = React.useRef<HTMLTextAreaElement>(null);
+  const reactBtnRefs = React.useRef<Record<string, HTMLButtonElement | null>>({});
 
   const fetchMessages = useCallback(async () => {
     if (!selectedChannelId) return;
@@ -179,8 +189,50 @@ export function ChatArea({
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
+  const fetchReplies = useCallback(async (msgId: string) => {
+    const { data } = await supabase
+      .from('messages')
+      .select('id, content, user_id, created_at, reply_count, thread_id')
+      .eq('thread_id', msgId)
+      .order('created_at', { ascending: true });
+    const replies = data ?? [];
+    setThreadReplies(replies);
+    const uniqueIds = [...new Set(replies.map(m => m.user_id))];
+    if (uniqueIds.length > 0) {
+      const { data: profiles } = await supabase
+        .from('profiles')
+        .select('id, full_name, avatar_url')
+        .in('id', uniqueIds);
+      const map: Record<string, { full_name: string | null; avatar_url: string | null }> = {};
+      for (const p of (profiles ?? [])) map[p.id] = { full_name: p.full_name, avatar_url: p.avatar_url };
+      setSenderProfiles(prev => ({ ...prev, ...map }));
+    }
+  }, []);
+
+  const openThread = (msg: DbMessage) => {
+    setThreadMsg(msg);
+    setThreadReplyInput('');
+    fetchReplies(msg.id);
+  };
+
+  const addReaction = (msgKey: string, emoji: string) => {
+    setReactions(prev => {
+      const existing = prev[msgKey] ?? [];
+      const idx = existing.findIndex(r => r.emoji === emoji);
+      if (idx >= 0) {
+        const updated = [...existing];
+        updated[idx] = { ...updated[idx], count: updated[idx].count + 1 };
+        return { ...prev, [msgKey]: updated };
+      }
+      return { ...prev, [msgKey]: [...existing, { emoji, count: 1 }] };
+    });
+    setReactPickerMsgId(null);
+    setReactPickerPos(null);
+  };
+
   return (
-    <div className="flex-1 flex flex-col min-h-0 bg-white">
+    <div className="flex-1 flex min-h-0 min-w-0">
+      <div className="flex flex-col min-h-0 bg-white flex-1 min-w-0">
       {/* Header */}
       <div className="h-14 border-b border-gray-200 flex items-center justify-between px-4 relative">
         {selectedDM ? (
@@ -293,69 +345,135 @@ export function ChatArea({
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+      <div className="flex-1 overflow-y-auto px-2 pt-6 pb-4">
         {selectedDM ? (
-          /* DM messages — hardcoded + local sent */
+          /* DM messages — all left-aligned, grouped by sender */
           <>
-            {selectedDM.messages.map((msg, i) => (
-              msg.from === 'them' ? (
-                <div key={i} className="flex gap-2 items-end relative group">
-                  <div className={`w-9 h-9 rounded-lg bg-gradient-to-br ${selectedDM.gradient} flex-shrink-0`} />
-                  <div>
-                    <div className="text-[12px] text-gray-500 mb-1 ml-1">{selectedDM.name}</div>
-                    <div className="bg-gray-100 rounded-2xl rounded-tl-sm px-3 py-2 text-[14px] text-gray-800 max-w-xs">{msg.text}</div>
-                    <div className="text-[11px] text-gray-400 mt-1 ml-1">{msg.time}</div>
-                  </div>
-                  <div className="absolute right-0 -top-3 opacity-0 group-hover:opacity-100 transition-all duration-150 bg-white border border-[#E5E7EB] rounded-lg shadow-sm flex items-center gap-1 px-1 py-1 z-10">
-                    <button title="Reply" className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><MessageSquare size={15} /></button>
-                    <button title="React" className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><SmilePlus size={15} /></button>
-                    <button title="More" className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><MoreHorizontal size={15} /></button>
-                  </div>
-                </div>
-              ) : (
-                <div key={i} className="flex justify-end relative group">
-                  <div>
-                    <div className="bg-[#4d298c] text-white rounded-2xl rounded-tr-sm px-3 py-2 text-[14px] max-w-xs">{msg.text}</div>
-                    <div className="text-[11px] text-gray-400 mt-1 text-right">{msg.time}</div>
-                  </div>
-                  <div className="absolute left-0 -top-3 opacity-0 group-hover:opacity-100 transition-all duration-150 bg-white border border-[#E5E7EB] rounded-lg shadow-sm flex items-center gap-1 px-1 py-1 z-10">
-                    <button title="Reply" className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><MessageSquare size={15} /></button>
-                    <button title="React" className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><SmilePlus size={15} /></button>
-                    <button title="More" className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><MoreHorizontal size={15} /></button>
-                  </div>
-                </div>
-              )
-            ))}
-            {sentMessages.map((msg, i) => (
-              <div key={`sent-${i}`} className="flex justify-end">
-                <div>
-                  {msg.kind === 'text' ? (
-                    <div className="bg-[#4d298c] text-white rounded-2xl rounded-tr-sm px-3 py-2 text-[14px] max-w-xs">{msg.text}</div>
+            {selectedDM.messages.map((msg, i) => {
+              const isMe = msg.from === 'me';
+              const prev = selectedDM.messages[i - 1];
+              const isGrouped = prev && prev.from === msg.from;
+              const dmKey = `dm-${i}`;
+              const senderName = isMe ? 'You' : selectedDM.name;
+              return (
+                <div key={i} className={`flex gap-3 relative group [&:hover_.toolbar]:opacity-100 px-4 py-1 hover:bg-[#f9fafb] transition-all duration-150${!isGrouped ? ' mt-3' : ''}`}>
+                  {isGrouped ? (
+                    <div className="w-9 flex-shrink-0" />
+                  ) : isMe ? (
+                    <div className="w-9 h-9 rounded-full bg-gradient-to-br from-[#4d298c] to-purple-400 flex items-center justify-center flex-shrink-0 mt-0.5">
+                      <span className="text-white text-[11px] font-bold">Me</span>
+                    </div>
                   ) : (
-                    <div className="bg-[#4d298c] text-white rounded-2xl rounded-tr-sm px-4 py-3 max-w-xs">
-                      <div className="flex items-center gap-2 text-[14px]">
-                        <span>🎤</span>
-                        <span>Voice note · {msg.duration}</span>
+                    <div className={`w-9 h-9 rounded-lg bg-gradient-to-br ${selectedDM.gradient} flex-shrink-0 mt-0.5`} />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    {!isGrouped && (
+                      <div className="flex items-baseline gap-2 mb-0.5">
+                        <span className="font-semibold text-[14px] text-gray-900">{senderName}</span>
+                        <span className="text-[12px] text-gray-400">{msg.time}</span>
                       </div>
-                      <button onClick={() => toggleTranscript(i)} className="text-purple-200 text-[12px] mt-1.5 underline hover:text-white block">
-                        {msg.transcriptOpen ? 'Hide transcript' : 'View transcript'}
-                      </button>
-                      {msg.transcriptOpen && (
-                        <div className="mt-2 text-[12px] text-purple-200 border-t border-white/20 pt-2 leading-relaxed">
-                          AI transcript will appear here after Supabase + Whisper integration
+                    )}
+                    <div className="text-[14px] text-gray-800 leading-relaxed">{msg.text}</div>
+                    {(reactions[dmKey] ?? []).length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {(reactions[dmKey] ?? []).map(r => (
+                          <button key={r.emoji} onClick={() => addReaction(dmKey, r.emoji)} className="bg-[#f5f0ff] border border-[#d8c9f7] rounded-full px-2 py-0.5 text-[13px] flex items-center gap-1 hover:bg-[#ede8f7] transition-all duration-150">
+                            <span>{r.emoji}</span><span className="text-[12px] text-[#4d298c] font-medium">{r.count}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className={`toolbar absolute right-2 -top-4 transition-all duration-150 bg-white border border-[#E5E7EB] rounded-lg shadow-sm flex items-center gap-1 p-1 z-20 ${moreMenuMsgId === dmKey || reactPickerMsgId === dmKey ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                    <button title="Reply" onClick={() => { setMessageInput(`@${senderName} `); textareaRef.current?.focus(); }} className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><MessageSquare size={15} /></button>
+                    <button ref={el => { reactBtnRefs.current[dmKey] = el; }} title="React" onClick={() => { if (reactPickerMsgId === dmKey) { setReactPickerMsgId(null); setReactPickerPos(null); } else { const rect = reactBtnRefs.current[dmKey]?.getBoundingClientRect(); setReactPickerPos(rect ? { top: rect.top - 48, left: rect.left } : null); setReactPickerMsgId(dmKey); } }} className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><SmilePlus size={15} /></button>
+                    <div className="relative">
+                      <button title="More" onClick={() => setMoreMenuMsgId(moreMenuMsgId === dmKey ? null : dmKey)} className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><MoreHorizontal size={15} /></button>
+                      {moreMenuMsgId === dmKey && (
+                        <div className="absolute right-0 top-full mt-1 bg-white border border-[#E5E7EB] rounded-xl shadow-lg py-1 w-44 z-20">
+                          <button onClick={() => { console.log('Reply in thread on DM', i); setMoreMenuMsgId(null); }} className="w-full text-left px-4 py-2 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors">Reply in thread</button>
+                          <button onClick={() => { navigator.clipboard.writeText(msg.text); setMoreMenuMsgId(null); }} className="w-full text-left px-4 py-2 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors">Copy text</button>
+                          <div className="my-1 border-t border-[#E5E7EB]" />
+                          <button onClick={() => { console.log('Delete DM message', i); setMoreMenuMsgId(null); }} className="w-full text-left px-4 py-2 text-[13px] text-red-500 hover:bg-red-50 transition-colors">Delete</button>
                         </div>
                       )}
                     </div>
-                  )}
-                  <div className="text-[11px] text-gray-400 mt-1 text-right">{msg.time}</div>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
+            {sentMessages.map((msg, i) => {
+              const lastDm = selectedDM.messages[selectedDM.messages.length - 1];
+              const isGrouped = i > 0 || lastDm?.from === 'me';
+              const sentKey = `sent-${i}`;
+              const msgText = msg.kind === 'text' ? msg.text : `Voice note · ${msg.duration}`;
+              return (
+                <div key={sentKey} className={`flex gap-3 relative group [&:hover_.toolbar]:opacity-100 px-4 py-1 hover:bg-[#f9fafb] transition-all duration-150${!isGrouped ? ' mt-3' : ''}`}>
+                  {isGrouped ? (
+                    <div className="w-9 flex-shrink-0" />
+                  ) : (
+                    <div className="w-9 h-9 rounded-full bg-gradient-to-br from-[#4d298c] to-purple-400 flex items-center justify-center flex-shrink-0 mt-0.5">
+                      <span className="text-white text-[11px] font-bold">Me</span>
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    {!isGrouped && (
+                      <div className="flex items-baseline gap-2 mb-0.5">
+                        <span className="font-semibold text-[14px] text-gray-900">You</span>
+                        <span className="text-[12px] text-gray-400">{msg.time}</span>
+                      </div>
+                    )}
+                    {msg.kind === 'text' ? (
+                      <div className="text-[14px] text-gray-800 leading-relaxed">{msg.text}</div>
+                    ) : (
+                      <div className="text-[14px] text-gray-800">
+                        <div className="flex items-center gap-2">
+                          <span>🎤</span>
+                          <span>Voice note · {msg.duration}</span>
+                        </div>
+                        <button onClick={() => toggleTranscript(i)} className="text-[#4d298c] text-[12px] mt-1 hover:underline block">
+                          {msg.transcriptOpen ? 'Hide transcript' : 'View transcript'}
+                        </button>
+                        {msg.transcriptOpen && (
+                          <div className="mt-2 text-[12px] text-gray-500 border-t border-gray-200 pt-2 leading-relaxed">
+                            AI transcript will appear here after Supabase + Whisper integration
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {(reactions[sentKey] ?? []).length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {(reactions[sentKey] ?? []).map(r => (
+                          <button key={r.emoji} onClick={() => addReaction(sentKey, r.emoji)} className="bg-[#f5f0ff] border border-[#d8c9f7] rounded-full px-2 py-0.5 text-[13px] flex items-center gap-1 hover:bg-[#ede8f7] transition-all duration-150">
+                            <span>{r.emoji}</span><span className="text-[12px] text-[#4d298c] font-medium">{r.count}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className={`toolbar absolute right-2 -top-4 transition-all duration-150 bg-white border border-[#E5E7EB] rounded-lg shadow-sm flex items-center gap-1 p-1 z-20 ${moreMenuMsgId === sentKey || reactPickerMsgId === sentKey ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                    <button title="Reply" onClick={() => { setMessageInput('@You '); textareaRef.current?.focus(); }} className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><MessageSquare size={15} /></button>
+                    <button ref={el => { reactBtnRefs.current[sentKey] = el; }} title="React" onClick={() => { if (reactPickerMsgId === sentKey) { setReactPickerMsgId(null); setReactPickerPos(null); } else { const rect = reactBtnRefs.current[sentKey]?.getBoundingClientRect(); setReactPickerPos(rect ? { top: rect.top - 48, left: rect.left } : null); setReactPickerMsgId(sentKey); } }} className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><SmilePlus size={15} /></button>
+                    <div className="relative">
+                      <button title="More" onClick={() => setMoreMenuMsgId(moreMenuMsgId === sentKey ? null : sentKey)} className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><MoreHorizontal size={15} /></button>
+                      {moreMenuMsgId === sentKey && (
+                        <div className="absolute right-0 top-full mt-1 bg-white border border-[#E5E7EB] rounded-xl shadow-lg py-1 w-44 z-20">
+                          <button onClick={() => { console.log('Reply in thread on sent DM', i); setMoreMenuMsgId(null); }} className="w-full text-left px-4 py-2 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors">Reply in thread</button>
+                          <button onClick={() => { navigator.clipboard.writeText(msgText); setMoreMenuMsgId(null); }} className="w-full text-left px-4 py-2 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors">Copy text</button>
+                          <div className="my-1 border-t border-[#E5E7EB]" />
+                          <button onClick={() => { console.log('Delete sent DM', i); setMoreMenuMsgId(null); }} className="w-full text-left px-4 py-2 text-[13px] text-red-500 hover:bg-red-50 transition-colors">Delete</button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </>
         ) : selectedChannelId ? (
-          /* Channel messages — from Supabase */
+          /* Channel messages — Slack-style, all left-aligned, grouped by sender */
           <>
-            <div className="flex items-center gap-3 my-1">
+            <div className="flex items-center gap-3 my-1 px-2">
               <div className="flex-1 h-px bg-gray-200" />
               <span className="text-[11px] font-medium text-gray-400 px-1">Today</span>
               <div className="flex-1 h-px bg-gray-200" />
@@ -363,59 +481,64 @@ export function ChatArea({
             {dbMessages.length === 0 && (
               <p className="text-center text-[13px] text-gray-400 mt-8">No messages yet. Be the first to say something!</p>
             )}
-            {dbMessages.map(msg => {
-              const isMe = session?.user.id === msg.user_id;
-              return isMe ? (
-                <div key={msg.id} className="flex justify-end relative group">
-                  <div>
-                    <div className="bg-[#4d298c] text-white rounded-2xl rounded-tr-sm px-3 py-2 text-[14px] max-w-xs">{msg.content}</div>
-                    <div className="text-[11px] text-gray-400 mt-1 text-right">{formatTime(msg.created_at)}</div>
-                    {msg.reply_count > 0 && (
-                      <div className="text-[12px] text-[#4d298c] font-semibold cursor-pointer hover:underline text-right mt-0.5" onClick={() => console.log(msg.id)}>
-                        {msg.reply_count} {msg.reply_count === 1 ? 'reply' : 'replies'}
+            {dbMessages.map((msg, idx) => {
+              const prev = dbMessages[idx - 1];
+              const isGrouped = prev && prev.user_id === msg.user_id;
+              const p = senderProfiles[msg.user_id];
+              const name = p?.full_name ?? '';
+              const initials = name
+                ? name.trim().split(/\s+/).length >= 2
+                  ? (name.trim().split(/\s+/)[0][0] + name.trim().split(/\s+/).slice(-1)[0][0]).toUpperCase()
+                  : name.slice(0, 2).toUpperCase()
+                : '?';
+              return (
+                <div key={msg.id} className={`flex gap-3 relative group [&:hover_.toolbar]:opacity-100 px-4 py-1 hover:bg-[#f9fafb] transition-all duration-150${!isGrouped ? ' mt-3' : ''}`}>
+                  {isGrouped ? (
+                    <div className="w-8 flex-shrink-0" />
+                  ) : (
+                    p?.avatar_url
+                      ? <img src={p.avatar_url} alt={name} className="w-8 h-8 rounded-full object-cover flex-shrink-0 mt-0.5" />
+                      : <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#4d298c] to-purple-400 flex items-center justify-center flex-shrink-0 mt-0.5">
+                          <span className="text-white text-[11px] font-bold">{initials}</span>
+                        </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    {!isGrouped && (
+                      <div className="flex items-baseline gap-2 mb-0.5">
+                        <span className="font-semibold text-[14px] text-gray-900">{name || 'User'}</span>
+                        <span className="text-[12px] text-gray-400">{formatTime(msg.created_at)}</span>
                       </div>
                     )}
-                  </div>
-                  <div className="absolute left-0 -top-3 opacity-0 group-hover:opacity-100 transition-all duration-150 bg-white border border-[#E5E7EB] rounded-lg shadow-sm flex items-center gap-1 px-1 py-1 z-10">
-                    <button title="Reply" className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><MessageSquare size={15} /></button>
-                    <button title="React" className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><SmilePlus size={15} /></button>
-                    <button title="More" className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><MoreHorizontal size={15} /></button>
-                  </div>
-                </div>
-              ) : (
-                <div key={msg.id} className="flex gap-3 relative group">
-                  {(() => {
-                    const p = senderProfiles[msg.user_id];
-                    const name = p?.full_name ?? '';
-                    const initials = name
-                      ? name.trim().split(/\s+/).length >= 2
-                        ? (name.trim().split(/\s+/)[0][0] + name.trim().split(/\s+/).slice(-1)[0][0]).toUpperCase()
-                        : name.slice(0, 2).toUpperCase()
-                      : '?';
-                    return p?.avatar_url
-                      ? <img src={p.avatar_url} alt={name} className="w-8 h-8 rounded-full object-cover flex-shrink-0" />
-                      : <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#4d298c] to-purple-400 flex items-center justify-center flex-shrink-0">
-                          <span className="text-white text-[11px] font-bold">{initials}</span>
-                        </div>;
-                  })()}
-                  <div className="flex-1">
-                    <div className="flex items-baseline gap-2 mb-1">
-                      <span className="font-semibold text-[14px] text-gray-900">
-                        {senderProfiles[msg.user_id]?.full_name || 'User'}
-                      </span>
-                      <span className="text-[12px] text-gray-500">{formatTime(msg.created_at)}</span>
-                    </div>
                     <div className="text-[14px] text-gray-800 leading-relaxed">{msg.content}</div>
                     {msg.reply_count > 0 && (
-                      <div className="text-[12px] text-[#4d298c] font-semibold cursor-pointer hover:underline mt-0.5" onClick={() => console.log(msg.id)}>
+                      <div className="text-[12px] text-[#4d298c] font-semibold cursor-pointer hover:underline mt-0.5" onClick={() => openThread(msg)}>
                         {msg.reply_count} {msg.reply_count === 1 ? 'reply' : 'replies'}
                       </div>
                     )}
+                    {(reactions[msg.id] ?? []).length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {(reactions[msg.id] ?? []).map(r => (
+                          <button key={r.emoji} onClick={() => addReaction(msg.id, r.emoji)} className="bg-[#f5f0ff] border border-[#d8c9f7] rounded-full px-2 py-0.5 text-[13px] flex items-center gap-1 hover:bg-[#ede8f7] transition-all duration-150">
+                            <span>{r.emoji}</span><span className="text-[12px] text-[#4d298c] font-medium">{r.count}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  <div className="absolute right-0 -top-3 opacity-0 group-hover:opacity-100 transition-all duration-150 bg-white border border-[#E5E7EB] rounded-lg shadow-sm flex items-center gap-1 px-1 py-1 z-10">
-                    <button title="Reply" className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><MessageSquare size={15} /></button>
-                    <button title="React" className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><SmilePlus size={15} /></button>
-                    <button title="More" className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><MoreHorizontal size={15} /></button>
+                  <div className={`toolbar absolute right-2 -top-4 transition-all duration-150 bg-white border border-[#E5E7EB] rounded-lg shadow-sm flex items-center gap-1 p-1 z-20 ${moreMenuMsgId === msg.id || reactPickerMsgId === msg.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                    <button title="Reply" onClick={() => { setMessageInput(`@${name || 'User'} `); textareaRef.current?.focus(); }} className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><MessageSquare size={15} /></button>
+                    <button ref={el => { reactBtnRefs.current[msg.id] = el; }} title="React" onClick={() => { if (reactPickerMsgId === msg.id) { setReactPickerMsgId(null); setReactPickerPos(null); } else { const rect = reactBtnRefs.current[msg.id]?.getBoundingClientRect(); setReactPickerPos(rect ? { top: rect.top - 48, left: rect.left } : null); setReactPickerMsgId(msg.id); } }} className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><SmilePlus size={15} /></button>
+                    <div className="relative">
+                      <button title="More" onClick={() => setMoreMenuMsgId(moreMenuMsgId === msg.id ? null : msg.id)} className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><MoreHorizontal size={15} /></button>
+                      {moreMenuMsgId === msg.id && (
+                        <div className="absolute right-0 top-full mt-1 bg-white border border-[#E5E7EB] rounded-xl shadow-lg py-1 w-44 z-20">
+                          <button onClick={() => { openThread(msg); setMoreMenuMsgId(null); }} className="w-full text-left px-4 py-2 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors">Reply in thread</button>
+                          <button onClick={() => { navigator.clipboard.writeText(msg.content); setMoreMenuMsgId(null); }} className="w-full text-left px-4 py-2 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors">Copy text</button>
+                          <div className="my-1 border-t border-[#E5E7EB]" />
+                          <button onClick={() => { console.log('Delete message', msg.id); setMoreMenuMsgId(null); }} className="w-full text-left px-4 py-2 text-[13px] text-red-500 hover:bg-red-50 transition-colors">Delete</button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               );
@@ -592,6 +715,135 @@ export function ChatArea({
       )}
 
       <SearchModal isOpen={isSearchOpen} onClose={() => setIsSearchOpen(false)} />
+      </div>
+
+      {(moreMenuMsgId !== null || reactPickerMsgId !== null) && (
+        <div className="fixed inset-0 z-[19]" onClick={() => { setMoreMenuMsgId(null); setReactPickerMsgId(null); setReactPickerPos(null); }} />
+      )}
+
+      {reactPickerMsgId !== null && reactPickerPos !== null && (
+        <div className="fixed z-20 bg-white border border-[#E5E7EB] rounded-lg shadow-lg p-1 flex gap-0.5" style={{ top: reactPickerPos.top, left: reactPickerPos.left }}>
+          {QUICK_EMOJIS.map(e => <button key={e} onClick={() => addReaction(reactPickerMsgId, e)} className="text-base p-1 hover:bg-[#f5f0ff] rounded transition-all duration-150">{e}</button>)}
+        </div>
+      )}
+
+      {threadMsg && (
+        <div className="w-[360px] border-l border-[#E5E7EB] bg-white flex flex-col h-full flex-shrink-0">
+          {/* Thread header */}
+          <div className="h-14 border-b border-[#E5E7EB] flex items-center justify-between px-4 flex-shrink-0">
+            <span className="text-[15px] font-bold text-gray-900">Thread</span>
+            <button onClick={() => { setThreadMsg(null); setThreadReplyInput(''); }} className="p-1.5 hover:bg-gray-100 rounded transition-all duration-150">
+              <X size={18} className="text-gray-500" />
+            </button>
+          </div>
+
+          {/* Thread content */}
+          <div className="flex-1 overflow-y-auto px-4 py-4">
+            {/* Original message */}
+            <div className="flex gap-3 mb-4">
+              {(() => {
+                const p = senderProfiles[threadMsg.user_id];
+                const name = p?.full_name ?? '';
+                const initials = name
+                  ? name.trim().split(/\s+/).length >= 2
+                    ? (name.trim().split(/\s+/)[0][0] + name.trim().split(/\s+/).slice(-1)[0][0]).toUpperCase()
+                    : name.slice(0, 2).toUpperCase()
+                  : '?';
+                return p?.avatar_url
+                  ? <img src={p.avatar_url} alt={name} className="w-8 h-8 rounded-full object-cover flex-shrink-0" />
+                  : <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#4d298c] to-purple-400 flex items-center justify-center flex-shrink-0">
+                      <span className="text-white text-[11px] font-bold">{initials}</span>
+                    </div>;
+              })()}
+              <div className="flex-1">
+                <div className="flex items-baseline gap-2 mb-1">
+                  <span className="font-semibold text-[14px] text-gray-900">
+                    {senderProfiles[threadMsg.user_id]?.full_name || 'User'}
+                  </span>
+                  <span className="text-[12px] text-gray-500">{formatTime(threadMsg.created_at)}</span>
+                </div>
+                <div className="text-[14px] text-gray-800 leading-relaxed">{threadMsg.content}</div>
+              </div>
+            </div>
+
+            {/* Replies divider */}
+            <div className="flex items-center gap-3 my-3">
+              <div className="flex-1 h-px bg-gray-200" />
+              <span className="text-[12px] text-gray-400">
+                {threadReplies.length} {threadReplies.length === 1 ? 'reply' : 'replies'}
+              </span>
+              <div className="flex-1 h-px bg-gray-200" />
+            </div>
+
+            {/* Reply messages */}
+            <div className="space-y-4">
+              {threadReplies.map(reply => {
+                const p = senderProfiles[reply.user_id];
+                const name = p?.full_name ?? '';
+                const initials = name
+                  ? name.trim().split(/\s+/).length >= 2
+                    ? (name.trim().split(/\s+/)[0][0] + name.trim().split(/\s+/).slice(-1)[0][0]).toUpperCase()
+                    : name.slice(0, 2).toUpperCase()
+                  : '?';
+                return (
+                  <div key={reply.id} className="flex gap-3">
+                    {p?.avatar_url
+                      ? <img src={p.avatar_url} alt={name} className="w-8 h-8 rounded-full object-cover flex-shrink-0" />
+                      : <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#4d298c] to-purple-400 flex items-center justify-center flex-shrink-0">
+                          <span className="text-white text-[11px] font-bold">{initials}</span>
+                        </div>
+                    }
+                    <div className="flex-1">
+                      <div className="flex items-baseline gap-2 mb-1">
+                        <span className="font-semibold text-[14px] text-gray-900">{name || 'User'}</span>
+                        <span className="text-[12px] text-gray-500">{formatTime(reply.created_at)}</span>
+                      </div>
+                      <div className="text-[14px] text-gray-800 leading-relaxed">{reply.content}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Thread reply input */}
+          {(() => {
+            const sendReply = async () => {
+              const text = threadReplyInput.trim();
+              if (!text || !session || !threadMsg) return;
+              setThreadReplyInput('');
+              if (threadInputRef.current) threadInputRef.current.style.height = 'auto';
+              await supabase.from('messages').insert({ channel_id: selectedChannelId, user_id: session.user.id, content: text, thread_id: threadMsg.id });
+              await supabase.from('messages').update({ reply_count: threadMsg.reply_count + 1 }).eq('id', threadMsg.id);
+              setThreadMsg(prev => prev ? { ...prev, reply_count: prev.reply_count + 1 } : prev);
+              fetchReplies(threadMsg.id);
+              fetchMessages();
+            };
+            return (
+              <div className="border-t border-[#E5E7EB] p-3 flex-shrink-0">
+                <textarea
+                  ref={threadInputRef}
+                  placeholder="Reply in thread..."
+                  value={threadReplyInput}
+                  onChange={e => {
+                    setThreadReplyInput(e.target.value);
+                    e.target.style.height = 'auto';
+                    e.target.style.height = `${e.target.scrollHeight}px`;
+                  }}
+                  onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendReply(); } }}
+                  className="w-full border border-[#E5E7EB] rounded-lg px-3 py-2 text-[13px] resize-none outline-none focus:border-[#4d298c] min-h-[60px]"
+                />
+                <button
+                  onClick={sendReply}
+                  className="w-full mt-2 bg-[#4d298c] text-white rounded-lg px-3 py-1.5 text-[13px] font-medium hover:bg-[#3d1f70] transition-all duration-150"
+                >
+                  Send
+                </button>
+              </div>
+            );
+          })()}
+        </div>
+      )}
     </div>
   );
 }
