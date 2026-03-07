@@ -61,8 +61,13 @@ export function ChatArea({
   const [reactPickerPos,      setReactPickerPos]      = useState<{ top: number; left: number } | null>(null);
   const [reactions,           setReactions]           = useState<Record<string, { emoji: string; count: number }[]>>({});
   const [threadReplyInput,    setThreadReplyInput]    = useState('');
+  const [attachedFile,        setAttachedFile]        = useState<File | null>(null);
+  const [membersOpen,         setMembersOpen]         = useState(false);
+  const [members,             setMembers]             = useState<{ id: string; full_name: string | null; avatar_url: string | null; role: string }[]>([]);
+  const [copyLinkDone,        setCopyLinkDone]        = useState(false);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const threadInputRef = React.useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
   const reactBtnRefs = React.useRef<Record<string, HTMLButtonElement | null>>({});
 
   const fetchMessages = useCallback(async () => {
@@ -209,6 +214,15 @@ export function ChatArea({
     }
   }, []);
 
+  const fetchMembers = useCallback(async () => {
+    const { data: wm } = await supabase.from('workspace_members').select('user_id, role');
+    if (!wm?.length) { setMembers([]); return; }
+    const { data: profiles } = await supabase.from('profiles').select('id, full_name, avatar_url').in('id', wm.map(m => m.user_id));
+    const map: Record<string, { full_name: string | null; avatar_url: string | null }> = {};
+    for (const p of (profiles ?? [])) map[p.id] = { full_name: p.full_name, avatar_url: p.avatar_url };
+    setMembers(wm.map(m => ({ id: m.user_id, full_name: map[m.user_id]?.full_name ?? null, avatar_url: map[m.user_id]?.avatar_url ?? null, role: m.role })));
+  }, []);
+
   const openThread = (msg: DbMessage) => {
     setThreadMsg(msg);
     setThreadReplyInput('');
@@ -266,8 +280,8 @@ export function ChatArea({
           <button onClick={() => setIsSearchOpen(true)} className="p-2 hover:bg-gray-100 rounded transition-colors">
             <Search size={18} className="text-gray-600" />
           </button>
-          <button className="p-2 hover:bg-gray-100 rounded transition-colors">
-            <Users size={18} className="text-gray-600" />
+          <button onClick={() => { setMembersOpen(v => !v); if (!membersOpen) fetchMembers(); }} className={`p-2 rounded transition-colors ${membersOpen ? 'bg-[#ede8f7] text-[#4d298c]' : 'hover:bg-gray-100 text-gray-600'}`}>
+            <Users size={18} />
           </button>
           <div className="relative">
             <button
@@ -312,8 +326,8 @@ export function ChatArea({
                     >
                       {selectedChannelId && mutedChannelIds.has(selectedChannelId) ? 'Unmute channel' : 'Mute channel'}
                     </button>
-                    <button className="w-full text-left px-4 py-2.5 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors">
-                      Copy link
+                    <button onClick={() => { navigator.clipboard.writeText(window.location.href); setCopyLinkDone(true); setTimeout(() => setCopyLinkDone(false), 2000); }} className="w-full text-left px-4 py-2.5 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors">
+                      {copyLinkDone ? 'Copied!' : 'Copy link'}
                     </button>
                     <button className="w-full text-left px-4 py-2.5 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors">
                       Mark as read
@@ -535,7 +549,7 @@ export function ChatArea({
                           <button onClick={() => { openThread(msg); setMoreMenuMsgId(null); }} className="w-full text-left px-4 py-2 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors">Reply in thread</button>
                           <button onClick={() => { navigator.clipboard.writeText(msg.content); setMoreMenuMsgId(null); }} className="w-full text-left px-4 py-2 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors">Copy text</button>
                           <div className="my-1 border-t border-[#E5E7EB]" />
-                          <button onClick={() => { console.log('Delete message', msg.id); setMoreMenuMsgId(null); }} className="w-full text-left px-4 py-2 text-[13px] text-red-500 hover:bg-red-50 transition-colors">Delete</button>
+                          <button onClick={async () => { await supabase.from('messages').delete().eq('id', msg.id); setDbMessages(prev => prev.filter(m => m.id !== msg.id)); setMoreMenuMsgId(null); }} className="w-full text-left px-4 py-2 text-[13px] text-red-500 hover:bg-red-50 transition-colors">Delete</button>
                         </div>
                       )}
                     </div>
@@ -561,7 +575,19 @@ export function ChatArea({
 
       {/* Input Area */}
       <div className="border-t border-gray-200 p-4 relative">
+        <input ref={fileInputRef} type="file" accept="image/*,application/pdf,.doc,.docx,.txt" className="hidden" onChange={e => { setAttachedFile(e.target.files?.[0] ?? null); e.target.value = ''; }} />
         <div className="border border-gray-300 rounded-lg focus-within:border-[#4d298c] focus-within:ring-2 focus-within:ring-purple-100">
+          {attachedFile && (
+            <div className="px-4 pt-3 flex items-center gap-2">
+              <div className="flex items-center gap-2 bg-[#f5f0ff] border border-[#d8c9f7] rounded-lg px-3 py-1.5 text-[13px] text-[#4d298c] max-w-[240px]">
+                <Paperclip size={13} className="flex-shrink-0" />
+                <span className="truncate">{attachedFile.name}</span>
+              </div>
+              <button onClick={() => setAttachedFile(null)} className="text-gray-400 hover:text-gray-600 transition-colors">
+                <X size={14} />
+              </button>
+            </div>
+          )}
           <textarea
             ref={textareaRef}
             placeholder={selectedDM ? `Message ${selectedDM.name}...` : 'Type a message...'}
@@ -595,7 +621,7 @@ export function ChatArea({
           ) : (
             <div className="flex items-center justify-between px-3 py-2 border-t border-gray-200">
               <div className="flex items-center gap-2">
-                <button className="p-1.5 hover:bg-gray-100 rounded">
+                <button onClick={() => fileInputRef.current?.click()} className="p-1.5 hover:bg-gray-100 rounded transition-colors">
                   <Paperclip size={18} className="text-gray-600" />
                 </button>
 
@@ -843,6 +869,48 @@ export function ChatArea({
             );
           })()}
         </div>
+      )}
+
+      {membersOpen && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setMembersOpen(false)} />
+          <div className="fixed right-0 top-0 h-full w-[280px] bg-white border-l border-[#E5E7EB] z-50 flex flex-col shadow-xl">
+            <div className="h-14 border-b border-[#E5E7EB] flex items-center justify-between px-4 flex-shrink-0">
+              <span className="text-[15px] font-bold text-gray-900">Members</span>
+              <button onClick={() => setMembersOpen(false)} className="p-1.5 hover:bg-gray-100 rounded transition-all duration-150">
+                <X size={18} className="text-gray-500" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto py-2">
+              {members.length === 0 ? (
+                <p className="text-[13px] text-gray-400 text-center mt-8">No members found</p>
+              ) : (
+                members.map(m => {
+                  const name = m.full_name ?? 'Unknown';
+                  const initials = name.trim().split(/\s+/).length >= 2
+                    ? (name.trim().split(/\s+/)[0][0] + name.trim().split(/\s+/).slice(-1)[0][0]).toUpperCase()
+                    : name.slice(0, 2).toUpperCase();
+                  return (
+                    <div key={m.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 transition-colors">
+                      {m.avatar_url
+                        ? <img src={m.avatar_url} alt={name} className="w-8 h-8 rounded-full object-cover flex-shrink-0" />
+                        : <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#4d298c] to-purple-400 flex items-center justify-center flex-shrink-0">
+                            <span className="text-white text-[11px] font-bold">{initials}</span>
+                          </div>
+                      }
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[13px] font-medium text-gray-900 truncate">{name}</div>
+                      </div>
+                      <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${m.role === 'admin' ? 'bg-[#ede8f7] text-[#4d298c]' : 'bg-gray-100 text-gray-500'}`}>
+                        {m.role}
+                      </span>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </>
       )}
     </div>
   );
