@@ -1,4 +1,4 @@
-import { Hash, Users, Search, MoreHorizontal, Settings, Smile, Paperclip, AtSign, Send, Mic, Square, Inbox, MessageSquare, SmilePlus, X } from 'lucide-react';
+import { Hash, Users, Search, MoreHorizontal, Settings, Smile, Paperclip, AtSign, Send, Mic, Square, Inbox, MessageSquare, SmilePlus, X, Download } from 'lucide-react';
 import React, { useState, useEffect, useCallback } from 'react';
 import { SearchModal } from './SearchModal';
 import type { DMProfile } from '../App';
@@ -21,6 +21,8 @@ type DbMessage = {
   created_at: string;
   reply_count: number;
   thread_id: string | null;
+  file_url: string | null;
+  file_name: string | null;
 };
 
 const EMOJIS = [
@@ -62,6 +64,8 @@ export function ChatArea({
   const [reactions,           setReactions]           = useState<Record<string, { emoji: string; count: number }[]>>({});
   const [threadReplyInput,    setThreadReplyInput]    = useState('');
   const [attachedFile,        setAttachedFile]        = useState<File | null>(null);
+  const [lightboxUrl,         setLightboxUrl]         = useState<string | null>(null);
+  const [lightboxName,        setLightboxName]        = useState<string | null>(null);
   const [membersOpen,         setMembersOpen]         = useState(false);
   const [members,             setMembers]             = useState<{ id: string; full_name: string | null; avatar_url: string | null; role: string }[]>([]);
   const [copyLinkDone,        setCopyLinkDone]        = useState(false);
@@ -74,7 +78,7 @@ export function ChatArea({
     if (!selectedChannelId) return;
     const { data } = await supabase
       .from('messages')
-      .select('id, content, user_id, created_at, reply_count, thread_id')
+      .select('id, content, user_id, created_at, reply_count, thread_id, file_url, file_name')
       .eq('channel_id', selectedChannelId)
       .order('created_at', { ascending: true });
     const msgs = data ?? [];
@@ -96,8 +100,30 @@ export function ChatArea({
   useEffect(() => {
     setDbMessages([]);
     setSentMessages([]);
+    setAttachedFile(null);
+    setMessageInput('');
+    setEmojiPickerOpen(false);
+    setMentionDropdownOpen(false);
+    if (textareaRef.current) textareaRef.current.style.height = 'auto';
     fetchMessages();
   }, [selectedChannelId, fetchMessages]);
+
+  useEffect(() => {
+    if (!lightboxUrl) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { setLightboxUrl(null); setLightboxName(null); } };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [lightboxUrl]);
+
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (attachedFile && /\.(jpe?g|png|gif|webp)$/i.test(attachedFile.name)) {
+      const url = URL.createObjectURL(attachedFile);
+      setPreviewUrl(url);
+      return () => URL.revokeObjectURL(url);
+    }
+    setPreviewUrl(null);
+  }, [attachedFile]);
 
   useEffect(() => {
     if (!selectedChannelId) { setChannelName(''); setRenameInput(''); return; }
@@ -114,12 +140,15 @@ export function ChatArea({
   }, [selectedChannelId]);
 
   const handleSend = async () => {
-    if (!messageInput.trim()) return;
+    const hasText = messageInput.trim().length > 0;
+    const hasFile = attachedFile !== null;
+    if (!hasText && !hasFile) return;
 
     if (selectedDM) {
       // DM — local only
-      setSentMessages(prev => [...prev, { kind: 'text', text: messageInput.trim(), time: 'just now' }]);
+      setSentMessages(prev => [...prev, { kind: 'text', text: messageInput.trim() || `[File: ${attachedFile?.name}]`, time: 'just now' }]);
       setMessageInput('');
+      setAttachedFile(null);
       if (textareaRef.current) textareaRef.current.style.height = 'auto';
       return;
     }
@@ -128,12 +157,29 @@ export function ChatArea({
 
     const text = messageInput.trim();
     setMessageInput('');
+    setAttachedFile(null);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
+
+    let file_url: string | null = null;
+    let file_name: string | null = null;
+
+    if (attachedFile) {
+      const path = `${session.user.id}/${Date.now()}-${attachedFile.name}`;
+      const { error: uploadError } = await supabase.storage
+        .from('attachment')
+        .upload(path, attachedFile);
+      if (!uploadError) {
+        const { data: urlData } = supabase.storage.from('attachment').getPublicUrl(path);
+        file_url = urlData.publicUrl;
+        file_name = attachedFile.name;
+      }
+    }
 
     await supabase.from('messages').insert({
       channel_id: selectedChannelId,
       user_id: session.user.id,
       content: text,
+      ...(file_url ? { file_url, file_name } : {}),
     });
 
     fetchMessages();
@@ -197,7 +243,7 @@ export function ChatArea({
   const fetchReplies = useCallback(async (msgId: string) => {
     const { data } = await supabase
       .from('messages')
-      .select('id, content, user_id, created_at, reply_count, thread_id')
+      .select('id, content, user_id, created_at, reply_count, thread_id, file_url, file_name')
       .eq('thread_id', msgId)
       .order('created_at', { ascending: true });
     const replies = data ?? [];
@@ -523,7 +569,16 @@ export function ChatArea({
                         <span className="text-[12px] text-gray-400">{formatTime(msg.created_at)}</span>
                       </div>
                     )}
-                    <div className="text-[14px] text-gray-800 leading-relaxed">{msg.content}</div>
+                    {msg.content && <div className="text-[14px] text-gray-800 leading-relaxed">{msg.content}</div>}
+                    {msg.file_url && msg.file_name && (
+                      /\.(jpe?g|png|gif|webp)$/i.test(msg.file_name)
+                        ? <img src={msg.file_url} alt={msg.file_name} onClick={() => { setLightboxUrl(msg.file_url); setLightboxName(msg.file_name); }} className="mt-1.5 max-w-[300px] rounded-lg border border-[#E5E7EB] cursor-zoom-in" />
+                        : <div className="mt-1.5 inline-flex items-center gap-2 bg-[#f5f0ff] border border-[#d8c9f7] rounded-lg px-3 py-2">
+                            <Paperclip size={14} className="text-[#4d298c] flex-shrink-0" />
+                            <span className="text-[13px] text-[#4d298c] truncate max-w-[200px]">{msg.file_name}</span>
+                            <a href={msg.file_url} download={msg.file_name} target="_blank" rel="noreferrer" className="text-[12px] font-medium text-[#4d298c] hover:underline flex-shrink-0 flex items-center gap-1"><Download size={12} />Download</a>
+                          </div>
+                    )}
                     {msg.reply_count > 0 && (
                       <div className="text-[12px] text-[#4d298c] font-semibold cursor-pointer hover:underline mt-0.5" onClick={() => openThread(msg)}>
                         {msg.reply_count} {msg.reply_count === 1 ? 'reply' : 'replies'}
@@ -579,10 +634,35 @@ export function ChatArea({
         <div className="border border-gray-300 rounded-lg focus-within:border-[#4d298c] focus-within:ring-2 focus-within:ring-purple-100">
           {attachedFile && (
             <div className="px-4 pt-3 flex items-center gap-2">
-              <div className="flex items-center gap-2 bg-[#f5f0ff] border border-[#d8c9f7] rounded-lg px-3 py-1.5 text-[13px] text-[#4d298c] max-w-[240px]">
-                <Paperclip size={13} className="flex-shrink-0" />
-                <span className="truncate">{attachedFile.name}</span>
-              </div>
+              {previewUrl ? (
+                /* Image preview */
+                <div className="flex items-center gap-2 bg-[#f5f0ff] border border-[#d8c9f7] rounded-lg p-1.5 pr-3">
+                  <img src={previewUrl} alt={attachedFile.name} className="w-[60px] h-[60px] rounded-lg object-cover flex-shrink-0" />
+                  <div className="min-w-0">
+                    <div className="text-[13px] text-[#4d298c] truncate max-w-[180px]">{attachedFile.name}</div>
+                    <div className="text-[12px] text-[#7c5cbf]">
+                      {attachedFile.size < 1024
+                        ? `${attachedFile.size} B`
+                        : attachedFile.size < 1024 * 1024
+                          ? `${Math.round(attachedFile.size / 1024)} KB`
+                          : `${(attachedFile.size / (1024 * 1024)).toFixed(1)} MB`}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                /* Non-image file pill */
+                <div className="flex items-center gap-2 bg-[#f5f0ff] border border-[#d8c9f7] rounded-lg px-3 py-1.5 text-[13px] text-[#4d298c] max-w-[300px]">
+                  <Paperclip size={13} className="flex-shrink-0" />
+                  <span className="truncate">{attachedFile.name}</span>
+                  <span className="text-[12px] text-[#7c5cbf] flex-shrink-0">
+                    {attachedFile.size < 1024
+                      ? `${attachedFile.size} B`
+                      : attachedFile.size < 1024 * 1024
+                        ? `${Math.round(attachedFile.size / 1024)} KB`
+                        : `${(attachedFile.size / (1024 * 1024)).toFixed(1)} MB`}
+                  </span>
+                </div>
+              )}
               <button onClick={() => setAttachedFile(null)} className="text-gray-400 hover:text-gray-600 transition-colors">
                 <X size={14} />
               </button>
@@ -911,6 +991,21 @@ export function ChatArea({
             </div>
           </div>
         </>
+      )}
+
+      {/* Lightbox */}
+      {lightboxUrl && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center" onClick={() => { setLightboxUrl(null); setLightboxName(null); }}>
+          <div className="absolute top-4 right-4 flex items-center gap-2" onClick={e => e.stopPropagation()}>
+            <a href={lightboxUrl} download={lightboxName ?? undefined} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white text-[13px] rounded-lg transition-colors">
+              <Download size={14} />Download
+            </a>
+            <button onClick={() => { setLightboxUrl(null); setLightboxName(null); }} className="p-1.5 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-colors">
+              <X size={18} />
+            </button>
+          </div>
+          <img src={lightboxUrl} alt={lightboxName ?? ''} onClick={e => e.stopPropagation()} className="max-w-[90vw] max-h-[85vh] object-contain rounded-lg" />
+        </div>
       )}
     </div>
   );
