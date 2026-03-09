@@ -21,12 +21,19 @@ export function RightPanel({ selectedDM }: RightPanelProps) {
         {/* Compact profile header */}
         <div className="p-4 border-b border-gray-200 flex-shrink-0">
           <div className="flex flex-col items-center">
-            <div className={`w-14 h-14 rounded-xl bg-gradient-to-br ${selectedDM.gradient}`} />
+            {selectedDM.avatarUrl ? (
+              <img src={selectedDM.avatarUrl} alt={selectedDM.fullName} className="w-14 h-14 rounded-xl object-cover" />
+            ) : (
+              <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-[#4d298c] to-purple-400 flex items-center justify-center">
+                <span className="text-white text-[18px] font-bold">
+                  {selectedDM.fullName.trim().split(/\s+/).length >= 2
+                    ? (selectedDM.fullName.trim().split(/\s+/)[0][0] + selectedDM.fullName.trim().split(/\s+/).slice(-1)[0][0]).toUpperCase()
+                    : selectedDM.fullName.slice(0, 2).toUpperCase()}
+                </span>
+              </div>
+            )}
             <div className="text-center mt-2">
               <div className="font-bold text-[15px] text-gray-900">{selectedDM.fullName}</div>
-              <span className="text-[11px] bg-purple-100 text-[#4d298c] px-2 py-0.5 rounded-full font-medium">
-                {selectedDM.role}
-              </span>
             </div>
             <div className="flex items-center gap-1.5 mt-1">
               <div className={`w-2 h-2 rounded-full ${selectedDM.online ? 'bg-green-500' : 'bg-gray-400'}`} />

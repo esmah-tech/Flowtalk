@@ -46,6 +46,16 @@ type SentMessage =
   | { kind: 'text';  text: string;     time: string }
   | { kind: 'voice'; duration: string; time: string; transcriptOpen: boolean };
 
+type DmMessage = {
+  id: string;
+  sender_id: string;
+  receiver_id: string;
+  content: string;
+  file_url: string | null;
+  file_name: string | null;
+  created_at: string;
+};
+
 export function ChatArea({
   selectedDM, selectedChannelId,
   onSelectChannel, onChannelsChanged, onToggleMute, mutedChannelIds,
@@ -54,6 +64,8 @@ export function ChatArea({
   const [isSearchOpen,        setIsSearchOpen]        = useState(false);
   const [messageInput,        setMessageInput]        = useState('');
   const [sentMessages,        setSentMessages]        = useState<SentMessage[]>([]);
+  const [isRecording,         setIsRecording]         = useState(false);
+  const [dmMessages,          setDmMessages]          = useState<DmMessage[]>([]);
   const [dbMessages,          setDbMessages]          = useState<DbMessage[]>([]);
   const [senderProfiles,      setSenderProfiles]      = useState<Record<string, { full_name: string | null; avatar_url: string | null }>>({});
   const [settingsOpen,        setSettingsOpen]        = useState(false);
@@ -63,7 +75,6 @@ export function ChatArea({
   const [deleteConfirm,       setDeleteConfirm]       = useState(false);
   const [emojiPickerOpen,     setEmojiPickerOpen]     = useState(false);
   const [mentionDropdownOpen, setMentionDropdownOpen] = useState(false);
-  const [isRecording,         setIsRecording]         = useState(false);
   const [threadMsg,           setThreadMsg]           = useState<DbMessage | null>(null);
   const [threadReplies,       setThreadReplies]       = useState<DbMessage[]>([]);
   const [moreMenuMsgId,       setMoreMenuMsgId]       = useState<string | null>(null);
@@ -82,6 +93,26 @@ export function ChatArea({
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const reactBtnRefs = React.useRef<Record<string, HTMLButtonElement | null>>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const fetchDMMessages = useCallback(async (partnerId: string) => {
+    const myId = session?.user?.id;
+    if (!myId) return;
+    const { data } = await supabase
+      .from('direct_messages')
+      .select('id, sender_id, receiver_id, content, file_url, file_name, created_at')
+      .or(`and(sender_id.eq.${myId},receiver_id.eq.${partnerId}),and(sender_id.eq.${partnerId},receiver_id.eq.${myId})`)
+      .order('created_at', { ascending: true });
+    setDmMessages(data ?? []);
+    // Populate senderProfiles for both sides
+    const ids = [myId, partnerId];
+    const { data: profiles } = await supabase
+      .from('profiles')
+      .select('id, full_name, avatar_url')
+      .in('id', ids);
+    const map: Record<string, { full_name: string | null; avatar_url: string | null }> = {};
+    for (const p of (profiles ?? [])) map[p.id] = { full_name: p.full_name, avatar_url: p.avatar_url };
+    setSenderProfiles(prev => ({ ...prev, ...map }));
+  }, [session]);
 
   const fetchMessages = useCallback(async () => {
     if (!selectedChannelId) return;
@@ -156,6 +187,36 @@ export function ChatArea({
     };
   }, [selectedChannelId, fetchMessages]);
 
+  // DM loading + realtime
+  useEffect(() => {
+    setDmMessages([]);
+    setMessageInput('');
+    setAttachedFile(null);
+    setEmojiPickerOpen(false);
+    setMentionDropdownOpen(false);
+    if (textareaRef.current) textareaRef.current.style.height = 'auto';
+
+    if (!selectedDM || !session?.user) return;
+
+    fetchDMMessages(selectedDM.userId);
+
+    const myId = session.user.id;
+    const sub = supabase
+      .channel(`dm:${[myId, selectedDM.userId].sort().join('-')}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'direct_messages', filter: `receiver_id=eq.${myId}` },
+        (payload) => {
+          const msg = payload.new as DmMessage;
+          if (msg.sender_id !== selectedDM.userId) return;
+          setDmMessages(prev => [...prev, msg]);
+        }
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(sub); };
+  }, [selectedDM, session, fetchDMMessages]);
+
   useEffect(() => {
     if (!lightboxUrl) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { setLightboxUrl(null); setLightboxName(null); } };
@@ -197,11 +258,17 @@ export function ChatArea({
     if (!hasText && !hasFile) return;
 
     if (selectedDM) {
-      // DM — local only
-      setSentMessages(prev => [...prev, { kind: 'text', text: messageInput.trim() || `[File: ${attachedFile?.name}]`, time: 'just now' }]);
+      if (!session) return;
+      const text = messageInput.trim();
       setMessageInput('');
       setAttachedFile(null);
       if (textareaRef.current) textareaRef.current.style.height = 'auto';
+      const { data } = await supabase.from('direct_messages').insert({
+        sender_id: session.user.id,
+        receiver_id: selectedDM.userId,
+        content: text,
+      }).select('id, sender_id, receiver_id, content, file_url, file_name, created_at').single();
+      if (data) setDmMessages(prev => [...prev, data]);
       return;
     }
 
@@ -356,7 +423,17 @@ export function ChatArea({
         {selectedDM ? (
           <div className="flex items-center gap-3">
             <div className="relative">
-              <div className={`w-8 h-8 rounded-lg bg-gradient-to-br ${selectedDM.gradient}`} />
+              {selectedDM.avatarUrl ? (
+                <img src={selectedDM.avatarUrl} alt={selectedDM.fullName} className="w-8 h-8 rounded-full object-cover" />
+              ) : (
+                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#4d298c] to-purple-400 flex items-center justify-center">
+                  <span className="text-white text-[11px] font-bold">
+                    {selectedDM.fullName.trim().split(/\s+/).length >= 2
+                      ? (selectedDM.fullName.trim().split(/\s+/)[0][0] + selectedDM.fullName.trim().split(/\s+/).slice(-1)[0][0]).toUpperCase()
+                      : selectedDM.fullName.slice(0, 2).toUpperCase()}
+                  </span>
+                </div>
+              )}
               {selectedDM.online && (
                 <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-white" />
               )}
@@ -478,33 +555,45 @@ export function ChatArea({
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-2 pt-6 pb-4">
         {selectedDM ? (
-          /* DM messages — all left-aligned, grouped by sender */
+          /* DM messages — real from direct_messages table */
           <>
-            {selectedDM.messages.map((msg, i) => {
-              const isMe = msg.from === 'me';
-              const prev = selectedDM.messages[i - 1];
-              const isGrouped = prev && prev.from === msg.from;
-              const dmKey = `dm-${i}`;
-              const senderName = isMe ? 'You' : selectedDM.name;
+            {dmMessages.length === 0 && (
+              <p className="text-center text-[13px] text-gray-400 mt-8">
+                Start a conversation with {selectedDM.fullName}
+              </p>
+            )}
+            {dmMessages.map((msg, idx) => {
+              const isMe = msg.sender_id === session?.user?.id;
+              const prev = dmMessages[idx - 1];
+              const isGrouped = prev && prev.sender_id === msg.sender_id;
+              const dmKey = msg.id;
+              const p = senderProfiles[msg.sender_id];
+              const name = isMe
+                ? (p?.full_name ?? 'You')
+                : selectedDM.fullName;
+              const avatarUrl = isMe ? p?.avatar_url : selectedDM.avatarUrl;
+              const initials = name.trim().split(/\s+/).length >= 2
+                ? (name.trim().split(/\s+/)[0][0] + name.trim().split(/\s+/).slice(-1)[0][0]).toUpperCase()
+                : name.slice(0, 2).toUpperCase();
               return (
-                <div key={i} className={`flex gap-3 relative group [&:hover_.toolbar]:opacity-100 px-4 py-1 hover:bg-[#f9fafb] transition-all duration-150${!isGrouped ? ' mt-3' : ''}`}>
+                <div key={msg.id} className={`flex gap-3 relative group [&:hover_.toolbar]:opacity-100 px-4 py-1 hover:bg-[#f9fafb] transition-all duration-150${!isGrouped ? ' mt-3' : ''}`}>
                   {isGrouped ? (
-                    <div className="w-9 flex-shrink-0" />
-                  ) : isMe ? (
-                    <div className="w-9 h-9 rounded-full bg-gradient-to-br from-[#4d298c] to-purple-400 flex items-center justify-center flex-shrink-0 mt-0.5">
-                      <span className="text-white text-[11px] font-bold">Me</span>
-                    </div>
+                    <div className="w-8 flex-shrink-0" />
+                  ) : avatarUrl ? (
+                    <img src={avatarUrl} alt={name} className="w-8 h-8 rounded-full object-cover flex-shrink-0 mt-0.5" />
                   ) : (
-                    <div className={`w-9 h-9 rounded-lg bg-gradient-to-br ${selectedDM.gradient} flex-shrink-0 mt-0.5`} />
+                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#4d298c] to-purple-400 flex items-center justify-center flex-shrink-0 mt-0.5">
+                      <span className="text-white text-[11px] font-bold">{initials}</span>
+                    </div>
                   )}
                   <div className="flex-1 min-w-0">
                     {!isGrouped && (
                       <div className="flex items-baseline gap-2 mb-0.5">
-                        <span className="font-semibold text-[14px] text-gray-900">{senderName}</span>
-                        <span className="text-[12px] text-gray-400">{msg.time}</span>
+                        <span className="font-semibold text-[14px] text-gray-900">{name}</span>
+                        <span className="text-[12px] text-gray-400">{formatTime(msg.created_at)}</span>
                       </div>
                     )}
-                    <div className="text-[14px] text-gray-800 leading-relaxed">{msg.text}</div>
+                    {msg.content && <div className="text-[14px] text-gray-800 leading-relaxed">{msg.content}</div>}
                     {(reactions[dmKey] ?? []).length > 0 && (
                       <div className="flex flex-wrap gap-1 mt-1">
                         {(reactions[dmKey] ?? []).map(r => (
@@ -516,83 +605,13 @@ export function ChatArea({
                     )}
                   </div>
                   <div className={`toolbar absolute right-2 -top-4 transition-all duration-150 bg-white border border-[#E5E7EB] rounded-lg shadow-sm flex items-center gap-1 p-1 z-20 ${moreMenuMsgId === dmKey || reactPickerMsgId === dmKey ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
-                    <button title="Reply" onClick={() => { setMessageInput(`@${senderName} `); textareaRef.current?.focus(); }} className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><MessageSquare size={15} /></button>
+                    <button title="Reply" onClick={() => { setMessageInput(`@${name} `); textareaRef.current?.focus(); }} className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><MessageSquare size={15} /></button>
                     <button ref={el => { reactBtnRefs.current[dmKey] = el; }} title="React" onClick={() => { if (reactPickerMsgId === dmKey) { setReactPickerMsgId(null); setReactPickerPos(null); } else { const rect = reactBtnRefs.current[dmKey]?.getBoundingClientRect(); setReactPickerPos(rect ? { top: rect.top - 48, left: rect.left } : null); setReactPickerMsgId(dmKey); } }} className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><SmilePlus size={15} /></button>
                     <div className="relative">
                       <button title="More" onClick={() => setMoreMenuMsgId(moreMenuMsgId === dmKey ? null : dmKey)} className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><MoreHorizontal size={15} /></button>
                       {moreMenuMsgId === dmKey && (
                         <div className="absolute right-0 top-full mt-1 bg-white border border-[#E5E7EB] rounded-xl shadow-lg py-1 w-44 z-20">
-                          <button onClick={() => { console.log('Reply in thread on DM', i); setMoreMenuMsgId(null); }} className="w-full text-left px-4 py-2 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors">Reply in thread</button>
-                          <button onClick={() => { navigator.clipboard.writeText(msg.text); setMoreMenuMsgId(null); }} className="w-full text-left px-4 py-2 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors">Copy text</button>
-                          <div className="my-1 border-t border-[#E5E7EB]" />
-                          <button onClick={() => { console.log('Delete DM message', i); setMoreMenuMsgId(null); }} className="w-full text-left px-4 py-2 text-[13px] text-red-500 hover:bg-red-50 transition-colors">Delete</button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-            {sentMessages.map((msg, i) => {
-              const lastDm = selectedDM.messages[selectedDM.messages.length - 1];
-              const isGrouped = i > 0 || lastDm?.from === 'me';
-              const sentKey = `sent-${i}`;
-              const msgText = msg.kind === 'text' ? msg.text : `Voice note · ${msg.duration}`;
-              return (
-                <div key={sentKey} className={`flex gap-3 relative group [&:hover_.toolbar]:opacity-100 px-4 py-1 hover:bg-[#f9fafb] transition-all duration-150${!isGrouped ? ' mt-3' : ''}`}>
-                  {isGrouped ? (
-                    <div className="w-9 flex-shrink-0" />
-                  ) : (
-                    <div className="w-9 h-9 rounded-full bg-gradient-to-br from-[#4d298c] to-purple-400 flex items-center justify-center flex-shrink-0 mt-0.5">
-                      <span className="text-white text-[11px] font-bold">Me</span>
-                    </div>
-                  )}
-                  <div className="flex-1 min-w-0">
-                    {!isGrouped && (
-                      <div className="flex items-baseline gap-2 mb-0.5">
-                        <span className="font-semibold text-[14px] text-gray-900">You</span>
-                        <span className="text-[12px] text-gray-400">{msg.time}</span>
-                      </div>
-                    )}
-                    {msg.kind === 'text' ? (
-                      <div className="text-[14px] text-gray-800 leading-relaxed">{msg.text}</div>
-                    ) : (
-                      <div className="text-[14px] text-gray-800">
-                        <div className="flex items-center gap-2">
-                          <span>🎤</span>
-                          <span>Voice note · {msg.duration}</span>
-                        </div>
-                        <button onClick={() => toggleTranscript(i)} className="text-[#4d298c] text-[12px] mt-1 hover:underline block">
-                          {msg.transcriptOpen ? 'Hide transcript' : 'View transcript'}
-                        </button>
-                        {msg.transcriptOpen && (
-                          <div className="mt-2 text-[12px] text-gray-500 border-t border-gray-200 pt-2 leading-relaxed">
-                            AI transcript will appear here after Supabase + Whisper integration
-                          </div>
-                        )}
-                      </div>
-                    )}
-                    {(reactions[sentKey] ?? []).length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        {(reactions[sentKey] ?? []).map(r => (
-                          <button key={r.emoji} onClick={() => addReaction(sentKey, r.emoji)} className="bg-[#f5f0ff] border border-[#d8c9f7] rounded-full px-2 py-0.5 text-[13px] flex items-center gap-1 hover:bg-[#ede8f7] transition-all duration-150">
-                            <span>{r.emoji}</span><span className="text-[12px] text-[#4d298c] font-medium">{r.count}</span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <div className={`toolbar absolute right-2 -top-4 transition-all duration-150 bg-white border border-[#E5E7EB] rounded-lg shadow-sm flex items-center gap-1 p-1 z-20 ${moreMenuMsgId === sentKey || reactPickerMsgId === sentKey ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
-                    <button title="Reply" onClick={() => { setMessageInput('@You '); textareaRef.current?.focus(); }} className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><MessageSquare size={15} /></button>
-                    <button ref={el => { reactBtnRefs.current[sentKey] = el; }} title="React" onClick={() => { if (reactPickerMsgId === sentKey) { setReactPickerMsgId(null); setReactPickerPos(null); } else { const rect = reactBtnRefs.current[sentKey]?.getBoundingClientRect(); setReactPickerPos(rect ? { top: rect.top - 48, left: rect.left } : null); setReactPickerMsgId(sentKey); } }} className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><SmilePlus size={15} /></button>
-                    <div className="relative">
-                      <button title="More" onClick={() => setMoreMenuMsgId(moreMenuMsgId === sentKey ? null : sentKey)} className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><MoreHorizontal size={15} /></button>
-                      {moreMenuMsgId === sentKey && (
-                        <div className="absolute right-0 top-full mt-1 bg-white border border-[#E5E7EB] rounded-xl shadow-lg py-1 w-44 z-20">
-                          <button onClick={() => { console.log('Reply in thread on sent DM', i); setMoreMenuMsgId(null); }} className="w-full text-left px-4 py-2 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors">Reply in thread</button>
-                          <button onClick={() => { navigator.clipboard.writeText(msgText); setMoreMenuMsgId(null); }} className="w-full text-left px-4 py-2 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors">Copy text</button>
-                          <div className="my-1 border-t border-[#E5E7EB]" />
-                          <button onClick={() => { console.log('Delete sent DM', i); setMoreMenuMsgId(null); }} className="w-full text-left px-4 py-2 text-[13px] text-red-500 hover:bg-red-50 transition-colors">Delete</button>
+                          <button onClick={() => { navigator.clipboard.writeText(msg.content); setMoreMenuMsgId(null); }} className="w-full text-left px-4 py-2 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors">Copy text</button>
                         </div>
                       )}
                     </div>

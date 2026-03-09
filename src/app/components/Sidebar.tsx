@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/AuthContext';
+import type { DMProfile } from '../App';
 
 type DbChannel = {
   id: string;
@@ -13,14 +14,9 @@ type DbChannel = {
   is_active: boolean | null;
 };
 
-const DM_MEMBERS = [
-  { id: 'daniel', name: 'Daniel A.', online: true,  gradient: 'from-[#4d298c] to-purple-400' },
-  { id: 'emily',  name: 'Emily D.',  online: false, gradient: 'from-purple-400 to-pink-400' },
-];
-
 interface SidebarProps {
-  selectedDMId: string | null;
-  onSelectDM: (id: string) => void;
+  selectedDMUserId: string | null;
+  onSelectDM: (profile: DMProfile) => void;
   onClearDM: () => void;
   selectedChannelId: string | null;
   onSelectChannel: (id: string) => void;
@@ -127,7 +123,7 @@ function TogglePill({ on, onClick }: { on: boolean; onClick: (e: React.MouseEven
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
 
 export function Sidebar({
-  selectedDMId, onSelectDM, onClearDM, selectedChannelId, onSelectChannel,
+  selectedDMUserId, onSelectDM, onClearDM, selectedChannelId, onSelectChannel,
   reloadTrigger, mutedChannelIds,
 }: SidebarProps) {
   const navigate = useNavigate();
@@ -175,6 +171,8 @@ export function Sidebar({
   const [hiddenChannelIds, setHiddenChannelIds] = useState<Set<string>>(new Set());
   const [profileName, setProfileName] = useState<string | null>(null);
   const [profileAvatar, setProfileAvatar] = useState<string | null>(null);
+  const [dmMembers, setDmMembers] = useState<DMProfile[]>([]);
+  const [dmLoading, setDmLoading] = useState(true);
 
   useEffect(() => {
     if (!session?.user) return;
@@ -183,6 +181,33 @@ export function Sidebar({
         setProfileName(data?.full_name ?? null);
         setProfileAvatar(data?.avatar_url ?? null);
       });
+  }, [session]);
+
+  useEffect(() => {
+    if (!session?.user) return;
+    const myId = session.user.id;
+    (async () => {
+      setDmLoading(true);
+      const { data: wm } = await supabase
+        .from('workspace_members')
+        .select('user_id')
+        .neq('user_id', myId);
+      const ids = (wm ?? []).map((r: { user_id: string }) => r.user_id);
+      if (ids.length === 0) { setDmMembers([]); setDmLoading(false); return; }
+      const { data: profiles } = await supabase
+        .from('profiles')
+        .select('id, full_name, avatar_url')
+        .in('id', ids);
+      setDmMembers(
+        (profiles ?? []).map((p: { id: string; full_name: string | null; avatar_url: string | null }) => ({
+          userId: p.id,
+          fullName: p.full_name ?? p.id.slice(0, 8),
+          avatarUrl: p.avatar_url,
+          online: false,
+        }))
+      );
+      setDmLoading(false);
+    })();
   }, [session]);
   const [unreadChannels, setUnreadChannels] = useState<Map<string, { hasMention: boolean }>>(new Map());
 
@@ -255,12 +280,12 @@ export function Sidebar({
     });
   };
 
-  const handleSelectDM = (id: string) => {
+  const handleSelectDM = (profile: DMProfile) => {
     onSelectChannel('');
-    onSelectDM(id);
+    onSelectDM(profile);
   };
 
-  const isSelected = (id: string) => selectedChannelId === id && selectedDMId === null;
+  const isSelected = (id: string) => selectedChannelId === id && selectedDMUserId === null;
 
   const q = searchQuery.toLowerCase();
 
@@ -281,7 +306,7 @@ export function Sidebar({
     categoryMap.get(cat)!.push(c);
   });
 
-  const filteredDMs = DM_MEMBERS.filter(m => q === '' || m.name.toLowerCase().includes(q));
+  const filteredDMs = dmMembers.filter(m => q === '' || m.fullName.toLowerCase().includes(q));
 
   const sel = 'bg-purple-50 text-[#4d298c]';
   const def = 'hover:bg-gray-100 text-gray-700';
@@ -552,22 +577,40 @@ export function Sidebar({
 
           {dmExpanded && (
             <div className="space-y-0.5 px-2 pb-1">
-              {filteredDMs.map(member => (
-                <button
-                  key={member.id}
-                  onClick={() => handleSelectDM(member.id)}
-                  className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-[13px] text-left ${
-                    member.id === selectedDMId ? sel : def
-                  }`}
-                >
-                  <div className={`w-5 h-5 rounded-full bg-gradient-to-br ${member.gradient} relative shrink-0`}>
-                    {member.online && (
-                      <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 bg-green-500 rounded-full border border-[#f8f9fa]" />
-                    )}
-                  </div>
-                  <span className="truncate">{member.name}</span>
-                </button>
-              ))}
+              {dmLoading && (
+                <p className="px-2 py-1.5 text-[12px] text-gray-400">Loading…</p>
+              )}
+              {!dmLoading && filteredDMs.length === 0 && (
+                <p className="px-2 py-1.5 text-[12px] text-gray-400">No other members yet.</p>
+              )}
+              {!dmLoading && filteredDMs.map(member => {
+                const initials = member.fullName.trim().split(/\s+/).length >= 2
+                  ? (member.fullName.trim().split(/\s+/)[0][0] + member.fullName.trim().split(/\s+/).slice(-1)[0][0]).toUpperCase()
+                  : member.fullName.slice(0, 2).toUpperCase();
+                return (
+                  <button
+                    key={member.userId}
+                    onClick={() => handleSelectDM(member)}
+                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-[13px] text-left ${
+                      member.userId === selectedDMUserId ? sel : def
+                    }`}
+                  >
+                    <div className="relative shrink-0">
+                      {member.avatarUrl ? (
+                        <img src={member.avatarUrl} alt={member.fullName} className="w-5 h-5 rounded-full object-cover" />
+                      ) : (
+                        <div className="w-5 h-5 rounded-full bg-gradient-to-br from-[#4d298c] to-purple-400 flex items-center justify-center">
+                          <span className="text-white text-[9px] font-bold">{initials}</span>
+                        </div>
+                      )}
+                      {member.online && (
+                        <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 bg-green-500 rounded-full border border-[#f8f9fa]" />
+                      )}
+                    </div>
+                    <span className="truncate">{member.fullName}</span>
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>
