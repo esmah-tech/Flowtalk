@@ -1,5 +1,5 @@
 import { Hash, Users, Search, MoreHorizontal, Settings, Smile, Paperclip, AtSign, Send, Mic, Square, Inbox, MessageSquare, SmilePlus, X, Download, FileText, Pin } from 'lucide-react';
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { SearchModal } from './SearchModal';
 import type { DMProfile } from '../App';
 import { supabase } from '@/lib/supabase';
@@ -81,6 +81,7 @@ export function ChatArea({
   const threadInputRef = React.useRef<HTMLTextAreaElement>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const reactBtnRefs = React.useRef<Record<string, HTMLButtonElement | null>>({});
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const fetchMessages = useCallback(async () => {
     if (!selectedChannelId) return;
@@ -114,6 +115,45 @@ export function ChatArea({
     setMentionDropdownOpen(false);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
     fetchMessages();
+
+    if (!selectedChannelId) return;
+
+    const channel = supabase
+      .channel(`messages:${selectedChannelId}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'messages', filter: `channel_id=eq.${selectedChannelId}` },
+        async (payload) => {
+          const newMsg = payload.new as DbMessage;
+          // Fetch sender profile if not already cached
+          setSenderProfiles(prev => {
+            if (prev[newMsg.user_id]) return prev;
+            supabase
+              .from('profiles')
+              .select('id, full_name, avatar_url')
+              .eq('id', newMsg.user_id)
+              .single()
+              .then(({ data }) => {
+                if (data) setSenderProfiles(p => ({ ...p, [data.id]: { full_name: data.full_name, avatar_url: data.avatar_url } }));
+              });
+            return prev;
+          });
+          setDbMessages(prev => [...prev, newMsg]);
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'messages', filter: `channel_id=eq.${selectedChannelId}` },
+        (payload) => {
+          const updated = payload.new as DbMessage;
+          setDbMessages(prev => prev.map(m => m.id === updated.id ? updated : m));
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [selectedChannelId, fetchMessages]);
 
   useEffect(() => {
@@ -122,6 +162,10 @@ export function ChatArea({
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [lightboxUrl]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [dbMessages]);
 
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   useEffect(() => {
@@ -644,6 +688,7 @@ export function ChatArea({
                 </div>
               );
             })}
+            <div ref={messagesEndRef} />
           </>
         ) : selectedChannelId === '' ? (
           /* Inbox — empty state */
