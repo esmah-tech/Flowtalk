@@ -1,4 +1,4 @@
-import { Hash, Users, Search, MoreHorizontal, Settings, Smile, Paperclip, AtSign, Send, Mic, Square, Inbox, MessageSquare, SmilePlus, X, Download, FileText, Pin } from 'lucide-react';
+import { Hash, Users, Search, MoreHorizontal, Settings, Smile, Paperclip, AtSign, Send, Mic, Square, Inbox, MessageSquare, SmilePlus, X, Download, FileText, Pin, Bell } from 'lucide-react';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { SearchModal } from './SearchModal';
 import type { DMProfile } from '../App';
@@ -56,6 +56,17 @@ type DmMessage = {
   created_at: string;
 };
 
+type Notification = {
+  id: string;
+  user_id: string;
+  from_user_id: string;
+  type: string;
+  message: string;
+  channel_id: string | null;
+  read: boolean;
+  created_at: string;
+};
+
 export function ChatArea({
   selectedDM, selectedChannelId,
   onSelectChannel, onChannelsChanged, onToggleMute, mutedChannelIds,
@@ -88,6 +99,8 @@ export function ChatArea({
   const [membersOpen,         setMembersOpen]         = useState(false);
   const [members,             setMembers]             = useState<{ id: string; full_name: string | null; avatar_url: string | null; role: string }[]>([]);
   const [copyLinkDone,        setCopyLinkDone]        = useState(false);
+  const [notifPanelOpen,      setNotifPanelOpen]      = useState(false);
+  const [notifications,       setNotifications]       = useState<Notification[]>([]);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const threadInputRef = React.useRef<HTMLTextAreaElement>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -301,6 +314,28 @@ export function ChatArea({
       ...(file_url ? { file_url, file_name } : {}),
     });
 
+    // @mention detection
+    if (text) {
+      const mentionRegex = /@([A-Za-z0-9 ]+)/g;
+      let match;
+      while ((match = mentionRegex.exec(text)) !== null) {
+        const mentionedName = match[1].trim();
+        const mentionedEntry = Object.entries(senderProfiles).find(
+          ([, profile]) => profile.full_name?.toLowerCase() === mentionedName.toLowerCase()
+        );
+        if (mentionedEntry && mentionedEntry[0] !== session.user.id) {
+          await supabase.from('notifications').insert({
+            user_id: mentionedEntry[0],
+            from_user_id: session.user.id,
+            type: 'mention',
+            message: `mentioned you in #${channelName}`,
+            channel_id: selectedChannelId,
+            read: false,
+          });
+        }
+      }
+    }
+
     fetchMessages();
   };
 
@@ -388,6 +423,80 @@ export function ChatArea({
     setMembers(wm.map(m => ({ id: m.user_id, full_name: map[m.user_id]?.full_name ?? null, avatar_url: map[m.user_id]?.avatar_url ?? null, role: m.role })));
   }, []);
 
+  const fetchNotifications = useCallback(async () => {
+    if (!session?.user) return;
+    const { data } = await supabase
+      .from('notifications')
+      .select('*')
+      .eq('user_id', session.user.id)
+      .order('created_at', { ascending: false });
+    setNotifications(data ?? []);
+  }, [session]);
+
+  useEffect(() => {
+    fetchNotifications();
+  }, [fetchNotifications]);
+
+  useEffect(() => {
+    if (!session?.user) return;
+    const myId = session.user.id;
+    const sub = supabase
+      .channel(`notif:${myId}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${myId}` },
+        (payload) => {
+          setNotifications(prev => [payload.new as Notification, ...prev]);
+        }
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(sub); };
+  }, [session]);
+
+  const notifUnreadCount = notifications.filter(n => !n.read).length;
+
+  const relativeTime = (iso: string) => {
+    const diff = Date.now() - new Date(iso).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    const days = Math.floor(hrs / 24);
+    if (days === 1) return 'Yesterday';
+    return `${days}d ago`;
+  };
+
+  const groupedNotifications = (() => {
+    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+    const yesterdayStart = new Date(todayStart); yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+    const todayItems = notifications.filter(n => new Date(n.created_at) >= todayStart);
+    const yesterdayItems = notifications.filter(n => new Date(n.created_at) >= yesterdayStart && new Date(n.created_at) < todayStart);
+    const earlierItems = notifications.filter(n => new Date(n.created_at) < yesterdayStart);
+    const groups: { label: string; items: Notification[] }[] = [];
+    if (todayItems.length > 0) groups.push({ label: 'Today', items: todayItems });
+    if (yesterdayItems.length > 0) groups.push({ label: 'Yesterday', items: yesterdayItems });
+    if (earlierItems.length > 0) groups.push({ label: 'Earlier', items: earlierItems });
+    return groups;
+  })();
+
+  const handleMarkAllRead = async () => {
+    if (!session?.user) return;
+    await supabase.from('notifications').update({ read: true }).eq('user_id', session.user.id).eq('read', false);
+    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+  };
+
+  const handleNotifClick = async (notif: Notification) => {
+    if (!notif.read) {
+      await supabase.from('notifications').update({ read: true }).eq('id', notif.id);
+      setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, read: true } : n));
+    }
+    if (notif.channel_id) {
+      onSelectChannel(notif.channel_id);
+      setNotifPanelOpen(false);
+    }
+  };
+
   const handlePinMessage = async (msgId: string, pin: boolean) => {
     await supabase.from('messages').update({ is_pinned: pin }).eq('id', msgId);
     setDbMessages(prev => prev.map(m => m.id === msgId ? { ...m, is_pinned: pin } : m));
@@ -461,6 +570,16 @@ export function ChatArea({
           <button onClick={() => setIsSearchOpen(true)} className="p-2 hover:bg-gray-100 rounded transition-colors">
             <Search size={18} className="text-gray-600" />
           </button>
+          <div className="relative">
+            <button onClick={() => setNotifPanelOpen(v => !v)} className={`p-2 rounded transition-colors ${notifPanelOpen ? 'bg-[#ede8f7] text-[#4d298c]' : 'hover:bg-gray-100 text-gray-600'}`}>
+              <Bell size={18} />
+            </button>
+            {notifUnreadCount > 0 && (
+              <span className="absolute top-0 right-0 bg-red-500 text-white text-[10px] rounded-full w-4 h-4 flex items-center justify-center font-semibold pointer-events-none">
+                {notifUnreadCount > 9 ? '9+' : notifUnreadCount}
+              </span>
+            )}
+          </div>
           <button onClick={() => { setMembersOpen(v => !v); if (!membersOpen) fetchMembers(); }} className={`p-2 rounded transition-colors ${membersOpen ? 'bg-[#ede8f7] text-[#4d298c]' : 'hover:bg-gray-100 text-gray-600'}`}>
             <Users size={18} />
           </button>
@@ -1049,6 +1168,74 @@ export function ChatArea({
             );
           })()}
         </div>
+      )}
+
+      {notifPanelOpen && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setNotifPanelOpen(false)} />
+          <div className="fixed right-0 top-0 h-full w-[320px] bg-white border-l border-[#E5E7EB] z-50 flex flex-col shadow-xl">
+            <div className="h-14 border-b border-[#E5E7EB] flex items-center justify-between px-4 flex-shrink-0">
+              <span className="text-[15px] font-bold text-gray-900">Notifications</span>
+              <div className="flex items-center gap-2">
+                {notifUnreadCount > 0 && (
+                  <button onClick={handleMarkAllRead} className="text-[12px] text-[#4d298c] font-medium hover:underline transition-all duration-150">
+                    Mark all read
+                  </button>
+                )}
+                <button onClick={() => setNotifPanelOpen(false)} className="p-1.5 hover:bg-gray-100 rounded transition-all duration-150">
+                  <X size={18} className="text-gray-500" />
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {notifications.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full text-center px-6">
+                  <Bell size={36} className="text-gray-200 mb-3" strokeWidth={1.5} />
+                  <p className="text-[13px] text-gray-400">No notifications yet</p>
+                </div>
+              ) : (
+                groupedNotifications.map(group => (
+                  <div key={group.label}>
+                    <div className="px-4 py-2 bg-gray-50 border-b border-[#E5E7EB]">
+                      <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">{group.label}</span>
+                    </div>
+                    {group.items.map(notif => {
+                      const fromProfile = senderProfiles[notif.from_user_id];
+                      const fromName = fromProfile?.full_name ?? 'Someone';
+                      const initials = fromName.trim().split(/\s+/).length >= 2
+                        ? (fromName.trim().split(/\s+/)[0][0] + fromName.trim().split(/\s+/).slice(-1)[0][0]).toUpperCase()
+                        : fromName.slice(0, 2).toUpperCase();
+                      return (
+                        <button
+                          key={notif.id}
+                          onClick={() => handleNotifClick(notif)}
+                          className={`w-full flex items-start gap-3 px-4 py-3 border-b border-[#F3F4F6] text-left transition-all duration-150 hover:bg-[#f5f0ff] ${!notif.read ? 'bg-[#f5f0ff] border-l-2 border-l-[#4d298c]' : 'bg-white'}`}
+                        >
+                          {fromProfile?.avatar_url ? (
+                            <img src={fromProfile.avatar_url} alt={fromName} className="w-8 h-8 rounded-full object-cover flex-shrink-0 mt-0.5" />
+                          ) : (
+                            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#4d298c] to-purple-400 flex items-center justify-center flex-shrink-0 mt-0.5">
+                              <span className="text-white text-[11px] font-bold">{initials}</span>
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <p className="text-[13px] text-gray-800 leading-snug">
+                              <span className="font-semibold">{fromName}</span> {notif.message}
+                            </p>
+                            <p className="text-[11px] text-gray-400 mt-0.5">{relativeTime(notif.created_at)}</p>
+                          </div>
+                          {!notif.read && (
+                            <div className="w-2 h-2 rounded-full bg-[#4d298c] flex-shrink-0 mt-1.5" />
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </>
       )}
 
       {membersOpen && (
