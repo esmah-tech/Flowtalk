@@ -1,4 +1,4 @@
-import { Hash, Users, Search, MoreHorizontal, Settings, Smile, Paperclip, AtSign, Send, Mic, Square, Inbox, MessageSquare, SmilePlus, X, Download } from 'lucide-react';
+import { Hash, Users, Search, MoreHorizontal, Settings, Smile, Paperclip, AtSign, Send, Mic, Square, Inbox, MessageSquare, SmilePlus, X, Download, FileText, Pin } from 'lucide-react';
 import React, { useState, useEffect, useCallback } from 'react';
 import { SearchModal } from './SearchModal';
 import type { DMProfile } from '../App';
@@ -23,6 +23,7 @@ type DbMessage = {
   thread_id: string | null;
   file_url: string | null;
   file_name: string | null;
+  is_pinned: boolean | null;
 };
 
 const EMOJIS = [
@@ -33,6 +34,13 @@ const EMOJIS = [
 ];
 const MENTION_MEMBERS = ['Daniel A.', 'Emily D.', 'Sophia Wilson', 'Diana T.'];
 const QUICK_EMOJIS = ['👍', '❤️', '😂', '🔥', '👀', '🎉'];
+
+function fileTypeIcon(name: string): { bg: string; icon: React.ReactNode } {
+  if (/\.pdf$/i.test(name))   return { bg: 'bg-red-50',    icon: <FileText size={18} className="text-red-500" /> };
+  if (/\.docx?$/i.test(name)) return { bg: 'bg-blue-50',   icon: <FileText size={18} className="text-blue-500" /> };
+  if (/\.txt$/i.test(name))   return { bg: 'bg-gray-100',  icon: <FileText size={18} className="text-gray-500" /> };
+  return                             { bg: 'bg-[#f5f0ff]', icon: <Paperclip size={18} className="text-[#4d298c]" /> };
+}
 
 type SentMessage =
   | { kind: 'text';  text: string;     time: string }
@@ -78,7 +86,7 @@ export function ChatArea({
     if (!selectedChannelId) return;
     const { data } = await supabase
       .from('messages')
-      .select('id, content, user_id, created_at, reply_count, thread_id, file_url, file_name')
+      .select('id, content, user_id, created_at, reply_count, thread_id, file_url, file_name, is_pinned')
       .eq('channel_id', selectedChannelId)
       .order('created_at', { ascending: true });
     const msgs = data ?? [];
@@ -269,6 +277,12 @@ export function ChatArea({
     setMembers(wm.map(m => ({ id: m.user_id, full_name: map[m.user_id]?.full_name ?? null, avatar_url: map[m.user_id]?.avatar_url ?? null, role: m.role })));
   }, []);
 
+  const handlePinMessage = async (msgId: string, pin: boolean) => {
+    await supabase.from('messages').update({ is_pinned: pin }).eq('id', msgId);
+    setDbMessages(prev => prev.map(m => m.id === msgId ? { ...m, is_pinned: pin } : m));
+    setMoreMenuMsgId(null);
+  };
+
   const openThread = (msg: DbMessage) => {
     setThreadMsg(msg);
     setThreadReplyInput('');
@@ -403,6 +417,19 @@ export function ChatArea({
         </div>
 
       </div>
+
+      {/* Pinned message banner */}
+      {(() => { const pinned = dbMessages.find(m => m.is_pinned); return pinned ? (
+        <div className="bg-[#f5f0ff] border-b border-[#d8c9f7] px-4 py-2 flex items-center gap-2">
+          <Pin size={14} className="text-[#4d298c] flex-shrink-0" />
+          <span className="text-[13px] text-[#4d298c] flex-1 truncate">
+            Pinned: {pinned.content.slice(0, 60)}{pinned.content.length > 60 ? '…' : ''}
+          </span>
+          <button onClick={() => handlePinMessage(pinned.id, false)} className="text-[#7c5cbf] hover:text-[#4d298c] flex-shrink-0 transition-colors">
+            <X size={14} />
+          </button>
+        </div>
+      ) : null; })()}
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-2 pt-6 pb-4">
@@ -573,11 +600,15 @@ export function ChatArea({
                     {msg.file_url && msg.file_name && (
                       /\.(jpe?g|png|gif|webp)$/i.test(msg.file_name)
                         ? <img src={msg.file_url} alt={msg.file_name} onClick={() => { setLightboxUrl(msg.file_url); setLightboxName(msg.file_name); }} className="mt-1.5 max-w-[300px] rounded-lg border border-[#E5E7EB] cursor-zoom-in" />
-                        : <div className="mt-1.5 inline-flex items-center gap-2 bg-[#f5f0ff] border border-[#d8c9f7] rounded-lg px-3 py-2">
-                            <Paperclip size={14} className="text-[#4d298c] flex-shrink-0" />
-                            <span className="text-[13px] text-[#4d298c] truncate max-w-[200px]">{msg.file_name}</span>
-                            <a href={msg.file_url} download={msg.file_name} target="_blank" rel="noreferrer" className="text-[12px] font-medium text-[#4d298c] hover:underline flex-shrink-0 flex items-center gap-1"><Download size={12} />Download</a>
+                        : (() => { const ft = fileTypeIcon(msg.file_name!); return (
+                          <div className="mt-1.5 bg-white border border-[#E5E7EB] rounded-lg px-3 py-2 inline-flex items-center gap-3">
+                            <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${ft.bg}`}>{ft.icon}</div>
+                            <div className="min-w-0">
+                              <div className="text-[13px] font-medium text-gray-900 truncate max-w-[180px]">{msg.file_name}</div>
+                              <a href={msg.file_url!} download={msg.file_name} target="_blank" rel="noreferrer" className="text-[12px] text-[#4d298c] hover:underline flex items-center gap-0.5 mt-0.5"><Download size={11} />Download</a>
+                            </div>
                           </div>
+                        ); })()
                     )}
                     {msg.reply_count > 0 && (
                       <div className="text-[12px] text-[#4d298c] font-semibold cursor-pointer hover:underline mt-0.5" onClick={() => openThread(msg)}>
@@ -601,6 +632,7 @@ export function ChatArea({
                       <button title="More" onClick={() => setMoreMenuMsgId(moreMenuMsgId === msg.id ? null : msg.id)} className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><MoreHorizontal size={15} /></button>
                       {moreMenuMsgId === msg.id && (
                         <div className="absolute right-0 top-full mt-1 bg-white border border-[#E5E7EB] rounded-xl shadow-lg py-1 w-44 z-20">
+                          <button onClick={() => handlePinMessage(msg.id, !msg.is_pinned)} className="w-full text-left px-4 py-2 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors">{msg.is_pinned ? 'Unpin message' : 'Pin message'}</button>
                           <button onClick={() => { openThread(msg); setMoreMenuMsgId(null); }} className="w-full text-left px-4 py-2 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors">Reply in thread</button>
                           <button onClick={() => { navigator.clipboard.writeText(msg.content); setMoreMenuMsgId(null); }} className="w-full text-left px-4 py-2 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors">Copy text</button>
                           <div className="my-1 border-t border-[#E5E7EB]" />
@@ -650,18 +682,22 @@ export function ChatArea({
                   </div>
                 </div>
               ) : (
-                /* Non-image file pill */
-                <div className="flex items-center gap-2 bg-[#f5f0ff] border border-[#d8c9f7] rounded-lg px-3 py-1.5 text-[13px] text-[#4d298c] max-w-[300px]">
-                  <Paperclip size={13} className="flex-shrink-0" />
-                  <span className="truncate">{attachedFile.name}</span>
-                  <span className="text-[12px] text-[#7c5cbf] flex-shrink-0">
-                    {attachedFile.size < 1024
-                      ? `${attachedFile.size} B`
-                      : attachedFile.size < 1024 * 1024
-                        ? `${Math.round(attachedFile.size / 1024)} KB`
-                        : `${(attachedFile.size / (1024 * 1024)).toFixed(1)} MB`}
-                  </span>
-                </div>
+                /* Non-image file card */
+                (() => { const ft = fileTypeIcon(attachedFile.name); return (
+                  <div className="bg-white border border-[#E5E7EB] rounded-lg px-3 py-2 flex items-center gap-3 max-w-[280px]">
+                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${ft.bg}`}>{ft.icon}</div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[13px] font-medium text-gray-900 truncate">{attachedFile.name}</div>
+                      <div className="text-[11px] text-gray-400">
+                        {attachedFile.size < 1024
+                          ? `${attachedFile.size} B`
+                          : attachedFile.size < 1024 * 1024
+                            ? `${Math.round(attachedFile.size / 1024)} KB`
+                            : `${(attachedFile.size / (1024 * 1024)).toFixed(1)} MB`}
+                      </div>
+                    </div>
+                  </div>
+                ); })()
               )}
               <button onClick={() => setAttachedFile(null)} className="text-gray-400 hover:text-gray-600 transition-colors">
                 <X size={14} />
