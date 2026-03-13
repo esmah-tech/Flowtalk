@@ -226,6 +226,7 @@ export function Sidebar({
     })();
   }, [session]);
   const [unreadChannels, setUnreadChannels] = useState<Map<string, { hasMention: boolean }>>(new Map());
+  const [unreadDMSenders, setUnreadDMSenders] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const sub = supabase
@@ -249,6 +250,40 @@ export function Sidebar({
       .subscribe();
     return () => { supabase.removeChannel(sub); };
   }, [selectedChannelId, mutedChannelIds]);
+
+  // ── DM unread tracking ─────────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (!session?.user) return;
+    const myId = session.user.id;
+    supabase
+      .from('direct_messages')
+      .select('sender_id')
+      .eq('receiver_id', myId)
+      .eq('read', false)
+      .then(({ data }) => {
+        setUnreadDMSenders(new Set((data ?? []).map((r: { sender_id: string }) => r.sender_id)));
+      });
+  }, [session]);
+
+  useEffect(() => {
+    if (!session?.user) return;
+    const myId = session.user.id;
+    const sub = supabase
+      .channel(`sidebar-dm:${myId}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'direct_messages', filter: `receiver_id=eq.${myId}` },
+        (payload) => {
+          const msg = payload.new as { sender_id: string };
+          setUnreadDMSenders(prev => new Set([...prev, msg.sender_id]));
+        }
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(sub); };
+  }, [session]);
+
+  // ── End DM unread tracking ──────────────────────────────────────────────────
 
   const currentUserId = session?.user?.id;
 
@@ -389,9 +424,22 @@ export function Sidebar({
     });
   };
 
-  const handleSelectDM = (profile: DMProfile) => {
+  const handleSelectDM = async (profile: DMProfile) => {
     onSelectChannel('');
     onSelectDM(profile);
+    if (session?.user && unreadDMSenders.has(profile.userId)) {
+      await supabase
+        .from('direct_messages')
+        .update({ read: true })
+        .eq('sender_id', profile.userId)
+        .eq('receiver_id', session.user.id)
+        .eq('read', false);
+      setUnreadDMSenders(prev => {
+        const next = new Set(prev);
+        next.delete(profile.userId);
+        return next;
+      });
+    }
   };
 
   const isSelected = (id: string) => selectedChannelId === id && selectedDMUserId === null;
@@ -728,6 +776,9 @@ export function Sidebar({
                       )}
                       {member.online && (
                         <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 bg-green-500 rounded-full border border-[#f8f9fa]" />
+                      )}
+                      {!member.online && unreadDMSenders.has(member.userId) && (
+                        <div className="absolute bottom-0 right-0 w-2 h-2 bg-[#4d298c] rounded-full" />
                       )}
                     </div>
                     <span className="truncate">{member.fullName}</span>

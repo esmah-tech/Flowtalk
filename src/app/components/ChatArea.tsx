@@ -32,7 +32,7 @@ const EMOJIS = [
   '❤️','🧡','💛','💚','💙','💜','🖤','💔','💯','✅','🔥','⭐',
   '🎉','🚀','💡','🎯','🏆','🎨','👀','💬','📌','🗓️','📎','🔗',
 ];
-const MENTION_MEMBERS = ['Daniel A.', 'Emily D.', 'Sophia Wilson', 'Diana T.'];
+
 const QUICK_EMOJIS = ['👍', '❤️', '😂', '🔥', '👀', '🎉'];
 
 function fileTypeIcon(name: string): { bg: string; icon: React.ReactNode } {
@@ -269,6 +269,14 @@ export function ChatArea({
         content: text,
       }).select('id, sender_id, receiver_id, content, file_url, file_name, created_at').single();
       if (data) setDmMessages(prev => [...prev, data]);
+      await supabase.from('notifications').insert({
+        user_id: selectedDM.userId,
+        from_user_id: session.user.id,
+        type: 'dm',
+        message: 'sent you a direct message',
+        channel_id: null,
+        read: false,
+      });
       return;
     }
 
@@ -307,12 +315,12 @@ export function ChatArea({
       let match;
       while ((match = mentionRegex.exec(text)) !== null) {
         const mentionedName = match[1].trim();
-        const mentionedEntry = Object.entries(senderProfiles).find(
-          ([, profile]) => profile.full_name?.toLowerCase() === mentionedName.toLowerCase()
+        const mentionedMember = members.find(
+          m => m.full_name?.toLowerCase() === mentionedName.toLowerCase()
         );
-        if (mentionedEntry && mentionedEntry[0] !== session.user.id) {
+        if (mentionedMember && mentionedMember.id !== session.user.id) {
           await supabase.from('notifications').insert({
-            user_id: mentionedEntry[0],
+            user_id: mentionedMember.id,
             from_user_id: session.user.id,
             type: 'mention',
             message: `mentioned you in #${channelName}`,
@@ -409,6 +417,8 @@ export function ChatArea({
     for (const p of (profiles ?? [])) map[p.id] = { full_name: p.full_name, avatar_url: p.avatar_url };
     setMembers(wm.map(m => ({ id: m.user_id, full_name: map[m.user_id]?.full_name ?? null, avatar_url: map[m.user_id]?.avatar_url ?? null, role: m.role })));
   }, []);
+
+  useEffect(() => { fetchMembers(); }, [fetchMembers]);
 
   const handlePinMessage = async (msgId: string, pin: boolean) => {
     await supabase.from('messages').update({ is_pinned: pin }).eq('id', msgId);
@@ -845,13 +855,13 @@ export function ChatArea({
                     <>
                       <div className="fixed inset-0 z-40" onClick={() => setMentionDropdownOpen(false)} />
                       <div className="absolute bottom-full left-0 mb-2 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1 min-w-[160px]">
-                        {MENTION_MEMBERS.map(name => (
+                        {members.filter(m => m.id !== session?.user?.id && m.full_name).map(m => (
                           <button
-                            key={name}
-                            onClick={() => handleMentionSelect(name)}
+                            key={m.id}
+                            onClick={() => handleMentionSelect(m.full_name!)}
                             className="w-full text-left px-3 py-2 text-[13px] text-gray-700 hover:bg-purple-50 hover:text-[#4d298c]"
                           >
-                            @{name}
+                            @{m.full_name}
                           </button>
                         ))}
                       </div>
@@ -1044,6 +1054,16 @@ export function ChatArea({
               await supabase.from('messages').insert({ channel_id: selectedChannelId, user_id: session.user.id, content: text, thread_id: threadMsg.id });
               await supabase.from('messages').update({ reply_count: threadMsg.reply_count + 1 }).eq('id', threadMsg.id);
               setThreadMsg(prev => prev ? { ...prev, reply_count: prev.reply_count + 1 } : prev);
+              if (threadMsg.user_id !== session.user.id) {
+                await supabase.from('notifications').insert({
+                  user_id: threadMsg.user_id,
+                  from_user_id: session.user.id,
+                  type: 'reply',
+                  message: `replied to your message in #${channelName}`,
+                  channel_id: selectedChannelId,
+                  read: false,
+                });
+              }
               fetchReplies(threadMsg.id);
               fetchMessages();
             };

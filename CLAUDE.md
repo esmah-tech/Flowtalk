@@ -40,6 +40,7 @@ Settings layout (Settings.tsx): left nav 200px | right content panel
 - workspace_members: id, user_id, role, invited_by, joined_at, invite_status
 - channel_visibility: id, channel_id, user_id, can_view, can_write, set_by
 - workspace_invites: id, email, token, role, invited_by, expires_at, accepted_at
+- tasks: id, title, assigned_to, assigned_by, due_date, status, source_message_id, source_channel_id, source_channel_name, source_message_content, source_message_time, source_sender_name, source_files (jsonb)
 
 ## Key Files
 - src/app/components/Sidebar.tsx — sidebar with categories, focus mode, DND, unread

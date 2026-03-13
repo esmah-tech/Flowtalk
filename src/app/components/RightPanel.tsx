@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Calendar, Plus, User, MoreHorizontal, Sparkles } from 'lucide-react';
 import type { DMProfile } from '../App';
+import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/lib/AuthContext';
 
 interface RightPanelProps {
   selectedDM: DMProfile | null;
@@ -161,29 +163,99 @@ function AIAnalyzerTab() {
   );
 }
 
+interface DBTask {
+  id: string;
+  title: string;
+  assigned_to: string;
+  assigned_by: string;
+  due_date: string | null;
+  status: 'pending' | 'done';
+  source_message_id: string | null;
+}
+
+interface UITask {
+  id: string;
+  title: string;
+  assignee: string;
+  dueDate: string;
+  completed: boolean;
+}
+
+function formatDueDate(d: string | null): string {
+  if (!d) return '—';
+  const date = new Date(d);
+  if (isNaN(date.getTime())) return d;
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function toUITask(t: DBTask): UITask {
+  return {
+    id: t.id,
+    title: t.title,
+    assignee: 'Me',
+    dueDate: formatDueDate(t.due_date),
+    completed: t.status === 'done',
+  };
+}
+
 function MyTasksTab() {
-  const [tasks, setTasks] = useState([
-    { id: 1, title: 'Keep layers organized', assignee: 'Daniel A.', dueDate: 'Feb 28', completed: false },
-    { id: 2, title: 'Prepare Lottie files for animations', assignee: 'Diana T.', dueDate: 'Feb 28', completed: false },
-    { id: 3, title: 'Review UI kit components', assignee: 'Emily D.', dueDate: 'Feb 25', completed: true },
-  ]);
+  const { session } = useAuth();
+  const userId = session?.user?.id;
+
+  const [tasks, setTasks] = useState<UITask[]>([]);
   const [addOpen, setAddOpen] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newDueDate, setNewDueDate] = useState('');
 
-  const toggleTask = (id: number) => {
+  useEffect(() => {
+    if (!userId) return;
+
+    supabase
+      .from('tasks')
+      .select('*')
+      .eq('assigned_to', userId)
+      .eq('status', 'pending')
+      .then(({ data }) => {
+        if (data) setTasks((data as DBTask[]).map(toUITask));
+      });
+
+    const channel = supabase
+      .channel(`tasks-insert-${userId}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'tasks', filter: `assigned_to=eq.${userId}` },
+        (payload) => {
+          setTasks(prev => [...prev, toUITask(payload.new as DBTask)]);
+        },
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [userId]);
+
+  const toggleTask = async (id: string) => {
+    const task = tasks.find(t => t.id === id);
+    if (!task) return;
+    const newStatus = task.completed ? 'pending' : 'done';
     setTasks(prev => prev.map(t => t.id === id ? { ...t, completed: !t.completed } : t));
+    await supabase.from('tasks').update({ status: newStatus }).eq('id', id);
   };
 
-  const addTask = () => {
-    if (!newTitle.trim()) return;
-    setTasks(prev => [...prev, {
-      id: Date.now(),
-      title: newTitle.trim(),
-      assignee: 'Me',
-      dueDate: newDueDate.trim() || '—',
-      completed: false,
-    }]);
+  const addTask = async () => {
+    if (!newTitle.trim() || !userId) return;
+    const { data } = await supabase
+      .from('tasks')
+      .insert({
+        title: newTitle.trim(),
+        assigned_to: userId,
+        assigned_by: userId,
+        due_date: newDueDate.trim() || null,
+        status: 'pending',
+        source_message_id: null,
+      })
+      .select()
+      .single();
+    if (data) setTasks(prev => [...prev, toUITask(data as DBTask)]);
     setNewTitle('');
     setNewDueDate('');
     setAddOpen(false);
