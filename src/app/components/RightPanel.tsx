@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Calendar, Plus, User, MoreHorizontal, Sparkles, ChevronDown, ChevronUp, FileText, Paperclip } from 'lucide-react';
-import type { DMProfile } from '../App';
+import type { DMProfile, LastDetectedTask } from '../App';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/AuthContext';
 
@@ -8,9 +8,10 @@ interface RightPanelProps {
   selectedDM: DMProfile | null;
   onJumpToMessage: (channelId: string, messageId: string) => void;
   selectedChannelId: string | null;
+  lastDetectedTask: LastDetectedTask | null;
 }
 
-export function RightPanel({ selectedDM, onJumpToMessage, selectedChannelId }: RightPanelProps) {
+export function RightPanel({ selectedDM, onJumpToMessage, selectedChannelId, lastDetectedTask }: RightPanelProps) {
   const [activeTab, setActiveTab] = useState('ai');
 
   const tabs = [
@@ -71,7 +72,7 @@ export function RightPanel({ selectedDM, onJumpToMessage, selectedChannelId }: R
 
         {/* Tab content */}
         <div className="flex-1 overflow-y-auto p-4">
-          {activeTab === 'ai'    && <AIAnalyzerTab selectedChannelId={selectedChannelId} />}
+          {activeTab === 'ai'    && <AIAnalyzerTab selectedChannelId={selectedChannelId} lastDetectedTask={lastDetectedTask} />}
           {activeTab === 'tasks' && <MyTasksTab onJumpToMessage={onJumpToMessage} />}
           {activeTab === 'files' && <FilesTab />}
         </div>
@@ -100,7 +101,7 @@ export function RightPanel({ selectedDM, onJumpToMessage, selectedChannelId }: R
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-4">
-        {activeTab === 'ai' && <AIAnalyzerTab selectedChannelId={selectedChannelId} />}
+        {activeTab === 'ai' && <AIAnalyzerTab selectedChannelId={selectedChannelId} lastDetectedTask={lastDetectedTask} />}
         {activeTab === 'tasks' && <MyTasksTab onJumpToMessage={onJumpToMessage} />}
         {activeTab === 'files' && <FilesTab />}
       </div>
@@ -108,7 +109,7 @@ export function RightPanel({ selectedDM, onJumpToMessage, selectedChannelId }: R
   );
 }
 
-function AIAnalyzerTab({ selectedChannelId }: { selectedChannelId: string | null }) {
+function AIAnalyzerTab({ selectedChannelId, lastDetectedTask }: { selectedChannelId: string | null; lastDetectedTask: LastDetectedTask | null }) {
   const [aiOn, setAiOn] = useState(true);
 
   // Fetch ai_enabled from Supabase on mount / channel change
@@ -160,20 +161,35 @@ function AIAnalyzerTab({ selectedChannelId }: { selectedChannelId: string | null
       </div>
 
       {/* Detected Task */}
-      <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
-        <div className="flex items-start gap-3">
-          <div className="w-8 h-8 rounded bg-gradient-to-br from-[#4d298c] to-purple-400 flex items-center justify-center flex-shrink-0">
-            <Sparkles size={16} className="text-white" />
-          </div>
-          <div className="flex-1">
-            <div className="text-[14px] text-gray-900 leading-relaxed">
-              <span className="font-semibold text-[#4d298c]">@Daniel A.</span> has been assigned:{' '}
-              <span className="font-medium">Keep layers organized</span> — added to task board
+      {lastDetectedTask ? (
+        <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
+          <div className="flex items-start gap-3">
+            <div className="w-8 h-8 rounded bg-gradient-to-br from-[#4d298c] to-purple-400 flex items-center justify-center flex-shrink-0">
+              <Sparkles size={16} className="text-white" />
             </div>
-            <div className="text-[12px] text-gray-500 mt-2">Detected 2 minutes ago</div>
+            <div className="flex-1">
+              <div className="text-[14px] text-gray-900 leading-relaxed">
+                <span className="font-semibold text-[#4d298c]">@{lastDetectedTask.assigneeName}</span> has been assigned:{' '}
+                <span className="font-medium">{lastDetectedTask.taskTitle}</span> — added to task board
+              </div>
+              <div className="text-[12px] text-gray-500 mt-2">
+                Detected at {lastDetectedTask.detectedAt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+              </div>
+            </div>
           </div>
         </div>
-      </div>
+      ) : (
+        <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
+          <div className="flex items-start gap-3">
+            <div className="w-8 h-8 rounded bg-gradient-to-br from-[#4d298c] to-purple-400 flex items-center justify-center flex-shrink-0 opacity-40">
+              <Sparkles size={16} className="text-white" />
+            </div>
+            <div className="flex-1">
+              <div className="text-[14px] text-gray-500 leading-relaxed">No tasks detected yet in this session.</div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Info text */}
       <div className="mt-4 p-3 bg-[#ede8f7] rounded-lg border border-[#d4c6f0]">

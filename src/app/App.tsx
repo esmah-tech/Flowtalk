@@ -11,11 +11,14 @@ export type DMProfile = {
   online: boolean;
 };
 
+export type LastDetectedTask = { assigneeName: string; taskTitle: string; detectedAt: Date };
+
 export default function App() {
   const [selectedDM, setSelectedDM] = useState<DMProfile | null>(null);
   const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const [channelReloadTick, setChannelReloadTick] = useState(0);
+  const [lastDetectedTask, setLastDetectedTask] = useState<LastDetectedTask | null>(null);
   const [mutedChannelIds, setMutedChannelIds] = useState<Set<string>>(() => {
     try {
       const stored = localStorage.getItem('flowtalk_muted_channels');
@@ -58,8 +61,9 @@ export default function App() {
         mutedChannelIds={mutedChannelIds}
         highlightedMessageId={highlightedMessageId}
         onClearHighlight={() => setHighlightedMessageId(null)}
+        onTaskDetected={setLastDetectedTask}
       />
-      <RightPanel selectedDM={selectedDM} onJumpToMessage={handleJumpToMessage} selectedChannelId={selectedChannelId} />
+      <RightPanel selectedDM={selectedDM} onJumpToMessage={handleJumpToMessage} selectedChannelId={selectedChannelId} lastDetectedTask={lastDetectedTask} />
     </div>
   );
 }

@@ -45,13 +45,16 @@ function fileTypeIcon(name: string): { bg: string; icon: React.ReactNode } {
   return                             { bg: 'bg-[#f5f0ff]', icon: <Paperclip size={18} className="text-[#4d298c]" /> };
 }
 
-function renderMessageContent(content: string): React.ReactNode {
-  const parts = content.split(/(@[A-Za-z0-9]+(?:\s[A-Za-z0-9]+)*)/g);
-  return parts.map((part, i) =>
-    part.startsWith('@') ? (
-      <span key={i} className="text-[#4d298c] font-semibold bg-[#ede8f7] px-1 rounded">{part}</span>
-    ) : part
-  );
+function renderMessageContent(content: string, members: { id: string; full_name: string | null }[]): React.ReactNode {
+  const parts = content.split(/(<@[a-zA-Z0-9\-]+>)/g);
+  return parts.map((part, i) => {
+    const match = part.match(/^<@([a-zA-Z0-9\-]+)>$/);
+    if (match) {
+      const member = members.find(m => m.id === match[1]);
+      return <span key={i} className="text-[#4d298c] font-semibold">@{member?.full_name ?? match[1]}</span>;
+    }
+    return part;
+  });
 }
 
 type SentMessage =
@@ -88,6 +91,7 @@ export function ChatArea({
   const [deleteConfirm,       setDeleteConfirm]       = useState(false);
   const [emojiPickerOpen,     setEmojiPickerOpen]     = useState(false);
   const [mentionDropdownOpen, setMentionDropdownOpen] = useState(false);
+  const [mentionFilter,       setMentionFilter]       = useState('');
   const [threadMsg,           setThreadMsg]           = useState<DbMessage | null>(null);
   const [threadReplies,       setThreadReplies]       = useState<DbMessage[]>([]);
   const [moreMenuMsgId,       setMoreMenuMsgId]       = useState<string | null>(null);
@@ -340,13 +344,11 @@ export function ChatArea({
 
     // @mention detection
     if (text) {
-      const mentionRegex = /@([A-Za-z0-9 ]+)/g;
+      const mentionRegex = /<@([a-zA-Z0-9\-]+)>/g;
       let match;
       while ((match = mentionRegex.exec(text)) !== null) {
-        const mentionedName = match[1].trim();
-        const mentionedMember = members.find(
-          m => m.full_name?.toLowerCase() === mentionedName.toLowerCase()
-        );
+        const mentionedId = match[1];
+        const mentionedMember = members.find(m => m.id === mentionedId);
         if (mentionedMember && mentionedMember.id !== session.user.id) {
           await supabase.from('notifications').insert({
             user_id: mentionedMember.id,
@@ -361,10 +363,13 @@ export function ChatArea({
     }
 
     // Background Gemini task detection — never blocks message send
-    if (text.includes('@') && insertedMsg) {
+    console.log('[Gemini] Trigger check: text has mention=', /<@[a-zA-Z0-9\-]+>/.test(text), '| insertedMsg=', insertedMsg?.id ?? null);
+    if (/<@[a-zA-Z0-9\-]+>/.test(text) && insertedMsg) {
       const { data: channelRow } = await supabase.from('channels').select('ai_enabled').eq('id', selectedChannelId).single();
+      console.log('[Gemini] ai_enabled check: channelRow=', channelRow, '| will run=', channelRow?.ai_enabled !== false);
       if (channelRow?.ai_enabled !== false) {
       const geminiKey = import.meta.env.VITE_GEMINI_API_KEY;
+      console.log('[Gemini] API key present=', !!geminiKey);
       const msgId = insertedMsg.id;
       const msgTime = insertedMsg.created_at;
       const senderName = members.find(m => m.id === session.user.id)?.full_name ?? null;
@@ -373,10 +378,16 @@ export function ChatArea({
       const capturedMembers = [...members];
       const capturedUserId = session.user.id;
       const sourceFiles = file_url && file_name ? [{ url: file_url, name: file_name }] : null;
+      console.log('[Gemini] Members count=', capturedMembers.length, '| members=', capturedMembers.map(m => m.full_name));
 
       (async () => {
         try {
-          const prompt = `Does this message assign a task? Message: ${text}\nReply only JSON: {hasTask:true,taskTitle:'max 8 words',assigneeName:'name after @',dueDate:'date or null'} or {hasTask:false}`;
+              const geminiText = text.replace(/<@([a-zA-Z0-9\-]+)>/g, (_, uid) => {
+            const m = capturedMembers.find(m => m.id === uid);
+            return m?.full_name ? `@${m.full_name}` : `@${uid}`;
+          });
+          const prompt = `Does this message assign a task? Message: ${geminiText}\nReply only JSON: {hasTask:true,taskTitle:'max 8 words',assigneeName:'name after @',dueDate:'date or null'} or {hasTask:false}`;
+          console.log('[Gemini] Sending prompt:', prompt);
           const res = await fetch(
             `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`,
             {
@@ -385,17 +396,24 @@ export function ChatArea({
               body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
             }
           );
+          console.log('[Gemini] API response status=', res.status, res.statusText);
           const data = await res.json();
+          console.log('[Gemini] API response data=', JSON.stringify(data).slice(0, 500));
           const raw: string = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+          console.log('[Gemini] Raw text=', raw);
           const jsonMatch = raw.match(/\{[\s\S]*\}/);
-          if (!jsonMatch) return;
+          if (!jsonMatch) { console.log('[Gemini] No JSON found in response, skipping'); return; }
           const parsed = JSON.parse(jsonMatch[0]);
-          if (!parsed.hasTask) return;
+          console.log('[Gemini] Parsed result=', parsed);
+          if (!parsed.hasTask) { console.log('[Gemini] hasTask=false, no task to create'); return; }
+          console.log('[Gemini] Looking for assignee name=', parsed.assigneeName, '| among members=', capturedMembers.map(m => m.full_name));
           const assignee = capturedMembers.find(
             m => m.full_name?.toLowerCase() === (parsed.assigneeName ?? '').toLowerCase()
           );
-          if (!assignee || assignee.id === capturedUserId) return;
-          await supabase.from('tasks').insert({
+          console.log('[Gemini] Assignee match=', assignee ?? 'NOT FOUND', '| sender id=', capturedUserId);
+          if (!assignee) { console.log('[Gemini] No assignee match, skipping'); return; }
+          if (assignee.id === capturedUserId) { console.log('[Gemini] Assignee is the sender, skipping self-assignment'); return; }
+          const insertPayload = {
             title: parsed.taskTitle,
             assigned_to: assignee.id,
             assigned_by: capturedUserId,
@@ -408,9 +426,15 @@ export function ChatArea({
             source_message_time: msgTime,
             source_sender_name: senderName,
             source_files: sourceFiles,
-          });
-        } catch {
-          // silently ignore — background task detection must never affect message send
+          };
+          console.log('[Gemini] Inserting task:', insertPayload);
+          const { data: insertData, error: insertError } = await supabase.from('tasks').insert(insertPayload).select().single();
+          console.log('[Gemini] Task insert result: data=', insertData, '| error=', insertError);
+          if (!insertError && insertData) {
+            onTaskDetected?.({ assigneeName: parsed.assigneeName, taskTitle: parsed.taskTitle, detectedAt: new Date() });
+          }
+        } catch (e) {
+          console.error('[Gemini] Error during task detection:', e);
         }
       })();
       } // end ai_enabled check
@@ -442,9 +466,14 @@ export function ChatArea({
     textareaRef.current?.focus();
   };
 
-  const handleMentionSelect = (name: string) => {
-    setMessageInput(v => (v.endsWith('@') ? v.slice(0, -1) : v) + `@${name} `);
+  const handleMentionSelect = (member: { id: string; full_name: string | null }) => {
+    setMessageInput(v => {
+      const atIdx = v.lastIndexOf('@');
+      const base = atIdx >= 0 ? v.slice(0, atIdx) : v;
+      return base + `<@${member.id}> `;
+    });
     setMentionDropdownOpen(false);
+    setMentionFilter('');
     textareaRef.current?.focus();
   };
 
@@ -710,7 +739,7 @@ export function ChatArea({
                         <span className="text-[12px] text-gray-400">{formatTime(msg.created_at)}</span>
                       </div>
                     )}
-                    {msg.content && <div className="text-[14px] text-gray-800 leading-relaxed">{renderMessageContent(msg.content)}</div>}
+                    {msg.content && <div className="text-[14px] text-gray-800 leading-relaxed">{renderMessageContent(msg.content, members)}</div>}
                     {(reactions[dmKey] ?? []).length > 0 && (
                       <div className="flex flex-wrap gap-1 mt-1">
                         {(reactions[dmKey] ?? []).map(r => (
@@ -781,7 +810,7 @@ export function ChatArea({
                         <span className="text-[12px] text-gray-400">{formatTime(msg.created_at)}</span>
                       </div>
                     )}
-                    {msg.content && <div className="text-[14px] text-gray-800 leading-relaxed">{renderMessageContent(msg.content)}</div>}
+                    {msg.content && <div className="text-[14px] text-gray-800 leading-relaxed">{renderMessageContent(msg.content, members)}</div>}
                     {msg.file_url && msg.file_name && (
                       /\.(jpe?g|png|gif|webp)$/i.test(msg.file_name)
                         ? <img src={msg.file_url} alt={msg.file_name} onClick={() => { setLightboxUrl(msg.file_url); setLightboxName(msg.file_name); }} className="mt-1.5 max-w-[300px] rounded-lg border border-[#E5E7EB] cursor-zoom-in" />
@@ -895,9 +924,19 @@ export function ChatArea({
             placeholder={selectedDM ? `Message ${selectedDM.name}...` : 'Type a message...'}
             value={messageInput}
             onChange={(e) => {
-              setMessageInput(e.target.value);
+              const val = e.target.value;
+              setMessageInput(val);
               e.target.style.height = 'auto';
               e.target.style.height = `${e.target.scrollHeight}px`;
+              const cursor = e.target.selectionStart ?? val.length;
+              const lastWord = val.slice(0, cursor).split(/\s/).pop() ?? '';
+              if (lastWord.startsWith('@')) {
+                setMentionFilter(lastWord.slice(1));
+                setMentionDropdownOpen(true);
+              } else {
+                setMentionDropdownOpen(false);
+                setMentionFilter('');
+              }
             }}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
             className="w-full px-4 py-3 text-[14px] resize-none outline-none rounded-t-lg min-h-[72px]"
@@ -945,10 +984,10 @@ export function ChatArea({
                     <>
                       <div className="fixed inset-0 z-40" onClick={() => setMentionDropdownOpen(false)} />
                       <div className="absolute bottom-full left-0 mb-2 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1 min-w-[160px]">
-                        {members.filter(m => m.id !== session?.user?.id && m.full_name).map(m => (
+                        {members.filter(m => m.id !== session?.user?.id && m.full_name && (mentionFilter === '' || m.full_name.toLowerCase().includes(mentionFilter.toLowerCase()))).map(m => (
                           <button
                             key={m.id}
-                            onClick={() => handleMentionSelect(m.full_name!)}
+                            onClick={() => handleMentionSelect(m)}
                             className="w-full text-left px-3 py-2 text-[13px] text-gray-700 hover:bg-purple-50 hover:text-[#4d298c]"
                           >
                             @{m.full_name}
@@ -1090,7 +1129,7 @@ export function ChatArea({
                   </span>
                   <span className="text-[12px] text-gray-500">{formatTime(threadMsg.created_at)}</span>
                 </div>
-                <div className="text-[14px] text-gray-800 leading-relaxed">{renderMessageContent(threadMsg.content)}</div>
+                <div className="text-[14px] text-gray-800 leading-relaxed">{renderMessageContent(threadMsg.content, members)}</div>
               </div>
             </div>
 
@@ -1126,7 +1165,7 @@ export function ChatArea({
                         <span className="font-semibold text-[14px] text-gray-900">{name || 'User'}</span>
                         <span className="text-[12px] text-gray-500">{formatTime(reply.created_at)}</span>
                       </div>
-                      <div className="text-[14px] text-gray-800 leading-relaxed">{renderMessageContent(reply.content)}</div>
+                      <div className="text-[14px] text-gray-800 leading-relaxed">{renderMessageContent(reply.content, members)}</div>
                     </div>
                   </div>
                 );
