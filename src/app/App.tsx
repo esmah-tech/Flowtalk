@@ -59,7 +59,7 @@ export default function App() {
         highlightedMessageId={highlightedMessageId}
         onClearHighlight={() => setHighlightedMessageId(null)}
       />
-      <RightPanel selectedDM={selectedDM} onJumpToMessage={handleJumpToMessage} />
+      <RightPanel selectedDM={selectedDM} onJumpToMessage={handleJumpToMessage} selectedChannelId={selectedChannelId} />
     </div>
   );
 }

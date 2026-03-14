@@ -345,6 +345,8 @@ export function ChatArea({
 
     // Background Gemini task detection — never blocks message send
     if (text.includes('@') && insertedMsg) {
+      const { data: channelRow } = await supabase.from('channels').select('ai_enabled').eq('id', selectedChannelId).single();
+      if (channelRow?.ai_enabled === false) return;
       const geminiKey = import.meta.env.VITE_GEMINI_API_KEY;
       const msgId = insertedMsg.id;
       const msgTime = insertedMsg.created_at;

@@ -7,9 +7,10 @@ import { useAuth } from '@/lib/AuthContext';
 interface RightPanelProps {
   selectedDM: DMProfile | null;
   onJumpToMessage: (channelId: string, messageId: string) => void;
+  selectedChannelId: string | null;
 }
 
-export function RightPanel({ selectedDM, onJumpToMessage }: RightPanelProps) {
+export function RightPanel({ selectedDM, onJumpToMessage, selectedChannelId }: RightPanelProps) {
   const [activeTab, setActiveTab] = useState('ai');
 
   const tabs = [
@@ -70,7 +71,7 @@ export function RightPanel({ selectedDM, onJumpToMessage }: RightPanelProps) {
 
         {/* Tab content */}
         <div className="flex-1 overflow-y-auto p-4">
-          {activeTab === 'ai'    && <AIAnalyzerTab />}
+          {activeTab === 'ai'    && <AIAnalyzerTab selectedChannelId={selectedChannelId} />}
           {activeTab === 'tasks' && <MyTasksTab onJumpToMessage={onJumpToMessage} />}
           {activeTab === 'files' && <FilesTab />}
         </div>
@@ -99,7 +100,7 @@ export function RightPanel({ selectedDM, onJumpToMessage }: RightPanelProps) {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-4">
-        {activeTab === 'ai' && <AIAnalyzerTab />}
+        {activeTab === 'ai' && <AIAnalyzerTab selectedChannelId={selectedChannelId} />}
         {activeTab === 'tasks' && <MyTasksTab onJumpToMessage={onJumpToMessage} />}
         {activeTab === 'files' && <FilesTab />}
       </div>
@@ -107,8 +108,28 @@ export function RightPanel({ selectedDM, onJumpToMessage }: RightPanelProps) {
   );
 }
 
-function AIAnalyzerTab() {
+function AIAnalyzerTab({ selectedChannelId }: { selectedChannelId: string | null }) {
   const [aiOn, setAiOn] = useState(true);
+
+  // Fetch ai_enabled from Supabase on mount / channel change
+  useEffect(() => {
+    if (!selectedChannelId) return;
+    supabase
+      .from('channels')
+      .select('ai_enabled')
+      .eq('id', selectedChannelId)
+      .single()
+      .then(({ data }) => {
+        if (data && typeof data.ai_enabled === 'boolean') setAiOn(data.ai_enabled);
+      });
+  }, [selectedChannelId]);
+
+  const handleToggle = async () => {
+    const next = !aiOn;
+    setAiOn(next);
+    if (!selectedChannelId) return;
+    await supabase.from('channels').update({ ai_enabled: next }).eq('id', selectedChannelId);
+  };
 
   return (
     <div>
@@ -127,7 +148,7 @@ function AIAnalyzerTab() {
           </span>
         </div>
         <button
-          onClick={() => setAiOn(!aiOn)}
+          onClick={handleToggle}
           className={`px-3 py-1.5 rounded text-[12px] font-medium transition-colors ${
             aiOn
               ? 'bg-green-100 text-green-700 hover:bg-green-200'
