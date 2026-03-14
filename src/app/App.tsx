@@ -14,6 +14,7 @@ export type DMProfile = {
 export default function App() {
   const [selectedDM, setSelectedDM] = useState<DMProfile | null>(null);
   const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null);
+  const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const [channelReloadTick, setChannelReloadTick] = useState(0);
   const [mutedChannelIds, setMutedChannelIds] = useState<Set<string>>(() => {
     try {
@@ -25,6 +26,10 @@ export default function App() {
   });
 
   const handleChannelsChanged = () => setChannelReloadTick(v => v + 1);
+  const handleJumpToMessage = (channelId: string, messageId: string) => {
+    setSelectedChannelId(channelId);
+    setHighlightedMessageId(messageId);
+  };
   const handleToggleMute = (id: string) => setMutedChannelIds(prev => {
     const n = new Set(prev);
     n.has(id) ? n.delete(id) : n.add(id);
@@ -51,8 +56,10 @@ export default function App() {
         onChannelsChanged={handleChannelsChanged}
         onToggleMute={handleToggleMute}
         mutedChannelIds={mutedChannelIds}
+        highlightedMessageId={highlightedMessageId}
+        onClearHighlight={() => setHighlightedMessageId(null)}
       />
-      <RightPanel selectedDM={selectedDM} />
+      <RightPanel selectedDM={selectedDM} onJumpToMessage={handleJumpToMessage} />
     </div>
   );
 }

@@ -6,9 +6,10 @@ import { useAuth } from '@/lib/AuthContext';
 
 interface RightPanelProps {
   selectedDM: DMProfile | null;
+  onJumpToMessage: (channelId: string, messageId: string) => void;
 }
 
-export function RightPanel({ selectedDM }: RightPanelProps) {
+export function RightPanel({ selectedDM, onJumpToMessage }: RightPanelProps) {
   const [activeTab, setActiveTab] = useState('ai');
 
   const tabs = [
@@ -70,7 +71,7 @@ export function RightPanel({ selectedDM }: RightPanelProps) {
         {/* Tab content */}
         <div className="flex-1 overflow-y-auto p-4">
           {activeTab === 'ai'    && <AIAnalyzerTab />}
-          {activeTab === 'tasks' && <MyTasksTab />}
+          {activeTab === 'tasks' && <MyTasksTab onJumpToMessage={onJumpToMessage} />}
           {activeTab === 'files' && <FilesTab />}
         </div>
       </div>
@@ -99,7 +100,7 @@ export function RightPanel({ selectedDM }: RightPanelProps) {
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-4">
         {activeTab === 'ai' && <AIAnalyzerTab />}
-        {activeTab === 'tasks' && <MyTasksTab />}
+        {activeTab === 'tasks' && <MyTasksTab onJumpToMessage={onJumpToMessage} />}
         {activeTab === 'files' && <FilesTab />}
       </div>
     </div>
@@ -176,6 +177,7 @@ interface DBTask {
   due_date: string | null;
   status: 'pending' | 'done';
   source_message_id: string | null;
+  source_channel_id: string | null;
   source_message_content: string | null;
   source_message_time: string | null;
   source_sender_name: string | null;
@@ -189,6 +191,8 @@ interface UITask {
   assignee: string;
   dueDate: string;
   completed: boolean;
+  sourceMessageId: string | null;
+  sourceChannelId: string | null;
   sourceMessageContent: string | null;
   sourceMessageTime: string | null;
   sourceSenderName: string | null;
@@ -210,6 +214,8 @@ function toUITask(t: DBTask): UITask {
     assignee: 'Me',
     dueDate: formatDueDate(t.due_date),
     completed: t.status === 'done',
+    sourceMessageId: t.source_message_id ?? null,
+    sourceChannelId: t.source_channel_id ?? null,
     sourceMessageContent: t.source_message_content ?? null,
     sourceMessageTime: t.source_message_time ?? null,
     sourceSenderName: t.source_sender_name ?? null,
@@ -244,7 +250,7 @@ function taskFileTypeIcon(name: string): { bg: string; icon: React.ReactNode } {
   return                             { bg: 'bg-[#f5f0ff]', icon: <Paperclip size={14} className="text-[#4d298c]" /> };
 }
 
-function MyTasksTab() {
+function MyTasksTab({ onJumpToMessage }: { onJumpToMessage: (channelId: string, messageId: string) => void }) {
   const { session } = useAuth();
   const userId = session?.user?.id;
 
@@ -450,9 +456,9 @@ function MyTasksTab() {
                         )}
 
                         {/* Jump to message link */}
-                        {task.sourceChannelName && (
+                        {task.sourceChannelId && task.sourceMessageId && task.sourceChannelName && (
                           <button
-                            onClick={() => console.log('Jump to message in', task.sourceChannelName, 'task id:', task.id)}
+                            onClick={() => onJumpToMessage(task.sourceChannelId!, task.sourceMessageId!)}
                             className="mt-2 text-[12px] text-[#4d298c] hover:underline flex items-center gap-1"
                           >
                             → Jump to message in #{task.sourceChannelName}

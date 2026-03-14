@@ -12,6 +12,8 @@ interface ChatAreaProps {
   onChannelsChanged: () => void;
   onToggleMute: (id: string) => void;
   mutedChannelIds: Set<string>;
+  highlightedMessageId: string | null;
+  onClearHighlight: () => void;
 }
 
 type DbMessage = {
@@ -59,6 +61,7 @@ type DmMessage = {
 export function ChatArea({
   selectedDM, selectedChannelId,
   onSelectChannel, onChannelsChanged, onToggleMute, mutedChannelIds,
+  highlightedMessageId, onClearHighlight,
 }: ChatAreaProps) {
   const { session } = useAuth();
   const [isSearchOpen,        setIsSearchOpen]        = useState(false);
@@ -93,6 +96,15 @@ export function ChatArea({
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const reactBtnRefs = React.useRef<Record<string, HTMLButtonElement | null>>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const msgRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+  useEffect(() => {
+    if (!highlightedMessageId) return;
+    const el = msgRefs.current[highlightedMessageId];
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const timer = setTimeout(() => onClearHighlight(), 2500);
+    return () => clearTimeout(timer);
+  }, [highlightedMessageId]);
 
   const fetchDMMessages = useCallback(async (partnerId: string) => {
     const myId = session?.user?.id;
@@ -674,7 +686,11 @@ export function ChatArea({
                   : name.slice(0, 2).toUpperCase()
                 : '?';
               return (
-                <div key={msg.id} className={`flex gap-3 relative group [&:hover_.toolbar]:opacity-100 px-4 py-1 hover:bg-[#f9fafb] transition-all duration-150${!isGrouped ? ' mt-3' : ''}`}>
+                <div
+                  key={msg.id}
+                  ref={el => { msgRefs.current[msg.id] = el; }}
+                  className={`flex gap-3 relative group [&:hover_.toolbar]:opacity-100 px-4 py-1 transition-all duration-150${!isGrouped ? ' mt-3' : ''} ${highlightedMessageId === msg.id ? 'bg-[#f5f0ff]' : 'hover:bg-[#f9fafb]'}`}
+                >
                   {isGrouped ? (
                     <div className="w-8 flex-shrink-0" />
                   ) : (
