@@ -314,12 +314,12 @@ export function ChatArea({
       }
     }
 
-    await supabase.from('messages').insert({
+    const { data: insertedMsg } = await supabase.from('messages').insert({
       channel_id: selectedChannelId,
       user_id: session.user.id,
       content: text,
       ...(file_url ? { file_url, file_name } : {}),
-    });
+    }).select('id, created_at').single();
 
     // @mention detection
     if (text) {
@@ -341,6 +341,59 @@ export function ChatArea({
           });
         }
       }
+    }
+
+    // Background Gemini task detection — never blocks message send
+    if (text.includes('@') && insertedMsg) {
+      const geminiKey = import.meta.env.VITE_GEMINI_API_KEY;
+      const msgId = insertedMsg.id;
+      const msgTime = insertedMsg.created_at;
+      const senderName = members.find(m => m.id === session.user.id)?.full_name ?? null;
+      const capturedChannelId = selectedChannelId;
+      const capturedChannelName = channelName;
+      const capturedMembers = [...members];
+      const capturedUserId = session.user.id;
+      const sourceFiles = file_url && file_name ? [{ url: file_url, name: file_name }] : null;
+
+      (async () => {
+        try {
+          const prompt = `Does this message assign a task? Message: ${text}\nReply only JSON: {hasTask:true,taskTitle:'max 8 words',assigneeName:'name after @',dueDate:'date or null'} or {hasTask:false}`;
+          const res = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+            }
+          );
+          const data = await res.json();
+          const raw: string = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+          const jsonMatch = raw.match(/\{[\s\S]*\}/);
+          if (!jsonMatch) return;
+          const parsed = JSON.parse(jsonMatch[0]);
+          if (!parsed.hasTask) return;
+          const assignee = capturedMembers.find(
+            m => m.full_name?.toLowerCase() === (parsed.assigneeName ?? '').toLowerCase()
+          );
+          if (!assignee || assignee.id === capturedUserId) return;
+          await supabase.from('tasks').insert({
+            title: parsed.taskTitle,
+            assigned_to: assignee.id,
+            assigned_by: capturedUserId,
+            due_date: parsed.dueDate ?? null,
+            status: 'pending',
+            source_message_id: msgId,
+            source_channel_id: capturedChannelId,
+            source_channel_name: capturedChannelName,
+            source_message_content: text,
+            source_message_time: msgTime,
+            source_sender_name: senderName,
+            source_files: sourceFiles,
+          });
+        } catch {
+          // silently ignore — background task detection must never affect message send
+        }
+      })();
     }
 
     fetchMessages();
