@@ -181,7 +181,7 @@ export function ChatArea({
               });
             return prev;
           });
-          setDbMessages(prev => [...prev, newMsg]);
+          setDbMessages(prev => prev.some(m => m.id === newMsg.id) ? prev : [...prev, newMsg]);
         }
       )
       .on(
@@ -213,15 +213,22 @@ export function ChatArea({
     fetchDMMessages(selectedDM.userId);
 
     const myId = session.user.id;
+    const partnerId = selectedDM.userId;
     const sub = supabase
-      .channel(`dm:${[myId, selectedDM.userId].sort().join('-')}`)
+      .channel(`dm:${[myId, partnerId].sort().join('-')}`)
       .on(
         'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'direct_messages', filter: `receiver_id=eq.${myId}` },
+        { event: 'INSERT', schema: 'public', table: 'direct_messages' },
         (payload) => {
           const msg = payload.new as DmMessage;
-          if (msg.sender_id !== selectedDM.userId) return;
-          setDmMessages(prev => [...prev, msg]);
+          // Only messages between this pair
+          const relevant =
+            (msg.sender_id === partnerId && msg.receiver_id === myId) ||
+            (msg.sender_id === myId && msg.receiver_id === partnerId);
+          if (!relevant) return;
+          // Sender already added the message locally in handleSend — skip to avoid duplicate
+          if (msg.sender_id === myId) return;
+          setDmMessages(prev => prev.some(m => m.id === msg.id) ? prev : [...prev, msg]);
         }
       )
       .subscribe();
@@ -238,7 +245,7 @@ export function ChatArea({
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [dbMessages]);
+  }, [dbMessages, dmMessages]);
 
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   useEffect(() => {
@@ -346,7 +353,7 @@ export function ChatArea({
     // Background Gemini task detection — never blocks message send
     if (text.includes('@') && insertedMsg) {
       const { data: channelRow } = await supabase.from('channels').select('ai_enabled').eq('id', selectedChannelId).single();
-      if (channelRow?.ai_enabled === false) return;
+      if (channelRow?.ai_enabled !== false) {
       const geminiKey = import.meta.env.VITE_GEMINI_API_KEY;
       const msgId = insertedMsg.id;
       const msgTime = insertedMsg.created_at;
@@ -396,6 +403,7 @@ export function ChatArea({
           // silently ignore — background task detection must never affect message send
         }
       })();
+      } // end ai_enabled check
     }
 
     fetchMessages();
@@ -718,6 +726,7 @@ export function ChatArea({
                 </div>
               );
             })}
+            <div ref={messagesEndRef} />
           </>
         ) : selectedChannelId ? (
           /* Channel messages — Slack-style, all left-aligned, grouped by sender */
