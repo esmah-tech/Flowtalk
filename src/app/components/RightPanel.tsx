@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, Plus, User, MoreHorizontal, Sparkles } from 'lucide-react';
+import { Calendar, Plus, User, MoreHorizontal, Sparkles, ChevronDown, ChevronUp, FileText, Paperclip } from 'lucide-react';
 import type { DMProfile } from '../App';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/AuthContext';
@@ -163,6 +163,11 @@ function AIAnalyzerTab() {
   );
 }
 
+interface SourceFile {
+  url: string;
+  name: string;
+}
+
 interface DBTask {
   id: string;
   title: string;
@@ -171,6 +176,11 @@ interface DBTask {
   due_date: string | null;
   status: 'pending' | 'done';
   source_message_id: string | null;
+  source_message_content: string | null;
+  source_message_time: string | null;
+  source_sender_name: string | null;
+  source_channel_name: string | null;
+  source_files: SourceFile[] | null;
 }
 
 interface UITask {
@@ -179,6 +189,11 @@ interface UITask {
   assignee: string;
   dueDate: string;
   completed: boolean;
+  sourceMessageContent: string | null;
+  sourceMessageTime: string | null;
+  sourceSenderName: string | null;
+  sourceChannelName: string | null;
+  sourceFiles: SourceFile[] | null;
 }
 
 function formatDueDate(d: string | null): string {
@@ -195,7 +210,38 @@ function toUITask(t: DBTask): UITask {
     assignee: 'Me',
     dueDate: formatDueDate(t.due_date),
     completed: t.status === 'done',
+    sourceMessageContent: t.source_message_content ?? null,
+    sourceMessageTime: t.source_message_time ?? null,
+    sourceSenderName: t.source_sender_name ?? null,
+    sourceChannelName: t.source_channel_name ?? null,
+    sourceFiles: t.source_files ?? null,
   };
+}
+
+function formatSourceTime(ts: string | null): string {
+  if (!ts) return '';
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return ts;
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) +
+    ', ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+}
+
+function senderInitials(name: string | null): string {
+  if (!name) return '?';
+  const parts = name.trim().split(/\s+/);
+  if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  return name.slice(0, 2).toUpperCase();
+}
+
+function isImageFile(name: string): boolean {
+  return /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(name);
+}
+
+function taskFileTypeIcon(name: string): { bg: string; icon: React.ReactNode } {
+  if (/\.pdf$/i.test(name))   return { bg: 'bg-red-50',    icon: <FileText size={14} className="text-red-500" /> };
+  if (/\.docx?$/i.test(name)) return { bg: 'bg-blue-50',   icon: <FileText size={14} className="text-blue-500" /> };
+  if (/\.txt$/i.test(name))   return { bg: 'bg-gray-100',  icon: <FileText size={14} className="text-gray-500" /> };
+  return                             { bg: 'bg-[#f5f0ff]', icon: <Paperclip size={14} className="text-[#4d298c]" /> };
 }
 
 function MyTasksTab() {
@@ -203,6 +249,7 @@ function MyTasksTab() {
   const userId = session?.user?.id;
 
   const [tasks, setTasks] = useState<UITask[]>([]);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [addOpen, setAddOpen] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newDueDate, setNewDueDate] = useState('');
@@ -304,39 +351,121 @@ function MyTasksTab() {
       )}
 
       <div className="space-y-2">
-        {tasks.map(task => (
-          <div
-            key={task.id}
-            className="border border-gray-200 rounded-lg p-3 hover:border-gray-300 transition-colors bg-white"
-          >
-            <div className="flex items-start gap-3">
-              <input
-                type="checkbox"
-                checked={task.completed}
-                onChange={() => toggleTask(task.id)}
-                className="mt-0.5 w-4 h-4 rounded border-gray-300 accent-[#4d298c] cursor-pointer"
-              />
-              <div className="flex-1">
-                <div className={`text-[14px] font-medium ${task.completed ? 'line-through text-gray-400' : 'text-gray-900'}`}>
-                  {task.title}
-                </div>
-                <div className="flex items-center gap-2 mt-2">
-                  <div className="flex items-center gap-1.5">
-                    <User size={12} className="text-gray-400" />
-                    <span className="text-[12px] text-gray-600">{task.assignee}</span>
+        {tasks.map(task => {
+          const isExpanded = expandedIds.has(task.id);
+          const hasSource = !!task.sourceMessageContent;
+          const toggleExpand = () => {
+            setExpandedIds(prev => {
+              const next = new Set(prev);
+              if (next.has(task.id)) next.delete(task.id); else next.add(task.id);
+              return next;
+            });
+          };
+          return (
+            <div
+              key={task.id}
+              className="border border-gray-200 rounded-lg p-3 hover:border-gray-300 transition-colors bg-white"
+            >
+              <div className="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  checked={task.completed}
+                  onChange={() => toggleTask(task.id)}
+                  className="mt-0.5 w-4 h-4 rounded border-gray-300 accent-[#4d298c] cursor-pointer"
+                />
+                <div className="flex-1 min-w-0">
+                  <div className={`text-[14px] font-medium ${task.completed ? 'line-through text-gray-400' : 'text-gray-900'}`}>
+                    {task.title}
                   </div>
-                  <span className="text-gray-300">•</span>
-                  <div className="flex items-center gap-1.5">
-                    <Calendar size={12} className="text-gray-400" />
-                    <span className={`text-[12px] ${task.completed ? 'text-gray-400' : 'text-gray-600'}`}>
-                      {task.dueDate}
-                    </span>
+                  <div className="flex items-center gap-2 mt-2">
+                    <div className="flex items-center gap-1.5">
+                      <User size={12} className="text-gray-400" />
+                      <span className="text-[12px] text-gray-600">{task.assignee}</span>
+                    </div>
+                    <span className="text-gray-300">•</span>
+                    <div className="flex items-center gap-1.5">
+                      <Calendar size={12} className="text-gray-400" />
+                      <span className={`text-[12px] ${task.completed ? 'text-gray-400' : 'text-gray-600'}`}>
+                        {task.dueDate}
+                      </span>
+                    </div>
+                    {hasSource && (
+                      <button
+                        onClick={toggleExpand}
+                        className="ml-auto p-0.5 hover:bg-gray-100 rounded transition-colors"
+                        aria-label={isExpanded ? 'Collapse source' : 'Expand source'}
+                      >
+                        {isExpanded
+                          ? <ChevronUp size={14} className="text-gray-400" />
+                          : <ChevronDown size={14} className="text-gray-400" />
+                        }
+                      </button>
+                    )}
                   </div>
+
+                  {/* Expandable source snippet */}
+                  {hasSource && (
+                    <div
+                      className={`overflow-hidden transition-all duration-200 ${isExpanded ? 'max-h-96 mt-2 opacity-100' : 'max-h-0 opacity-0'}`}
+                    >
+                      <div className="bg-[#f9f8fc] border border-[#e8e0f7] rounded-lg p-3">
+                        {/* Sender row */}
+                        <div className="flex items-center gap-2 mb-2">
+                          <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[#4d298c] to-purple-400 flex items-center justify-center flex-shrink-0">
+                            <span className="text-white text-[10px] font-bold leading-none">
+                              {senderInitials(task.sourceSenderName)}
+                            </span>
+                          </div>
+                          <span className="text-[12px] font-semibold text-gray-800">{task.sourceSenderName ?? 'Unknown'}</span>
+                          {task.sourceMessageTime && (
+                            <span className="text-[11px] text-gray-400 ml-auto">{formatSourceTime(task.sourceMessageTime)}</span>
+                          )}
+                        </div>
+
+                        {/* Message text */}
+                        <p className="text-[13px] text-gray-700 leading-relaxed">{task.sourceMessageContent}</p>
+
+                        {/* File attachments */}
+                        {task.sourceFiles && task.sourceFiles.length > 0 && (
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {task.sourceFiles.map((f, i) =>
+                              isImageFile(f.name) ? (
+                                <img
+                                  key={i}
+                                  src={f.url}
+                                  alt={f.name}
+                                  className="max-h-[80px] rounded border border-[#e8e0f7] object-cover"
+                                />
+                              ) : (() => {
+                                const { bg, icon } = taskFileTypeIcon(f.name);
+                                return (
+                                  <div key={i} className={`flex items-center gap-1.5 px-2 py-1 rounded border border-[#e8e0f7] ${bg}`}>
+                                    {icon}
+                                    <span className="text-[11px] text-gray-700 max-w-[100px] truncate">{f.name}</span>
+                                  </div>
+                                );
+                              })()
+                            )}
+                          </div>
+                        )}
+
+                        {/* Jump to message link */}
+                        {task.sourceChannelName && (
+                          <button
+                            onClick={() => console.log('Jump to message in', task.sourceChannelName, 'task id:', task.id)}
+                            className="mt-2 text-[12px] text-[#4d298c] hover:underline flex items-center gap-1"
+                          >
+                            → Jump to message in #{task.sourceChannelName}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
