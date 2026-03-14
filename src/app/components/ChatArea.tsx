@@ -97,7 +97,7 @@ export function ChatArea({
   const [moreMenuMsgId,       setMoreMenuMsgId]       = useState<string | null>(null);
   const [reactPickerMsgId,    setReactPickerMsgId]    = useState<string | null>(null);
   const [reactPickerPos,      setReactPickerPos]      = useState<{ top: number; left: number } | null>(null);
-  const [reactions,           setReactions]           = useState<Record<string, { emoji: string; count: number }[]>>({});
+  const [reactions,           setReactions]           = useState<Record<string, { emoji: string; count: number; byMe: boolean }[]>>({});
   const [threadReplyInput,    setThreadReplyInput]    = useState('');
   const [attachedFile,        setAttachedFile]        = useState<File | null>(null);
   const [lightboxUrl,         setLightboxUrl]         = useState<string | null>(null);
@@ -111,6 +111,7 @@ export function ChatArea({
   const reactBtnRefs = React.useRef<Record<string, HTMLButtonElement | null>>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const msgRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const dbMsgIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!highlightedMessageId) return;
@@ -150,6 +151,30 @@ export function ChatArea({
     const msgs = data ?? [];
     setDbMessages(msgs);
 
+    // Fetch reactions for loaded messages
+    const myId = session?.user?.id;
+    if (msgs.length > 0) {
+      const msgIds = msgs.map(m => m.id);
+      const { data: rxData } = await supabase
+        .from('message_reactions')
+        .select('message_id, user_id, emoji')
+        .in('message_id', msgIds);
+      const rxMap: Record<string, { emoji: string; count: number; byMe: boolean }[]> = {};
+      for (const rx of (rxData ?? [])) {
+        if (!rxMap[rx.message_id]) rxMap[rx.message_id] = [];
+        const existing = rxMap[rx.message_id].find(r => r.emoji === rx.emoji);
+        if (existing) {
+          existing.count++;
+          if (rx.user_id === myId) existing.byMe = true;
+        } else {
+          rxMap[rx.message_id].push({ emoji: rx.emoji, count: 1, byMe: rx.user_id === myId });
+        }
+      }
+      setReactions(rxMap);
+    } else {
+      setReactions({});
+    }
+
     // Fetch profiles for unique senders (excluding current user — we already know them)
     const uniqueIds = [...new Set(msgs.map(m => m.user_id))];
     if (uniqueIds.length > 0) {
@@ -161,19 +186,27 @@ export function ChatArea({
       for (const p of (profiles ?? [])) map[p.id] = { full_name: p.full_name, avatar_url: p.avatar_url };
       setSenderProfiles(map);
     }
-  }, [selectedChannelId]);
+  }, [selectedChannelId, session]);
+
+  // Keep a ref of current message IDs for filtering real-time reaction events
+  useEffect(() => {
+    dbMsgIdsRef.current = new Set(dbMessages.map(m => m.id));
+  }, [dbMessages]);
 
   useEffect(() => {
     setDbMessages([]);
     setSentMessages([]);
     setAttachedFile(null);
     setMessageInput('');
+    setReactions({});
     setEmojiPickerOpen(false);
     setMentionDropdownOpen(false);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
     fetchMessages();
 
     if (!selectedChannelId) return;
+
+    const myId = session?.user?.id;
 
     const channel = supabase
       .channel(`messages:${selectedChannelId}`)
@@ -204,6 +237,43 @@ export function ChatArea({
         (payload) => {
           const updated = payload.new as DbMessage;
           setDbMessages(prev => prev.map(m => m.id === updated.id ? updated : m));
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'message_reactions' },
+        (payload) => {
+          const rx = payload.new as { message_id: string; user_id: string; emoji: string };
+          if (!dbMsgIdsRef.current.has(rx.message_id)) return;
+          setReactions(prev => {
+            const list = prev[rx.message_id] ?? [];
+            const idx = list.findIndex(r => r.emoji === rx.emoji);
+            if (idx >= 0) {
+              const updated = [...list];
+              updated[idx] = { ...updated[idx], count: updated[idx].count + 1, byMe: updated[idx].byMe || rx.user_id === myId };
+              return { ...prev, [rx.message_id]: updated };
+            }
+            return { ...prev, [rx.message_id]: [...list, { emoji: rx.emoji, count: 1, byMe: rx.user_id === myId }] };
+          });
+        }
+      )
+      .on(
+        'postgres_changes',
+        // Requires REPLICA IDENTITY FULL on message_reactions for full old row data on DELETE
+        { event: 'DELETE', schema: 'public', table: 'message_reactions' },
+        (payload) => {
+          const rx = payload.old as { message_id?: string; user_id?: string; emoji?: string };
+          if (!rx.message_id || !rx.emoji) return;
+          if (!dbMsgIdsRef.current.has(rx.message_id)) return;
+          setReactions(prev => {
+            const list = (prev[rx.message_id!] ?? [])
+              .map(r => r.emoji === rx.emoji
+                ? { ...r, count: r.count - 1, byMe: rx.user_id === myId ? false : r.byMe }
+                : r
+              )
+              .filter(r => r.count > 0);
+            return { ...prev, [rx.message_id!]: list };
+          });
         }
       )
       .subscribe();
@@ -546,17 +616,40 @@ export function ChatArea({
     fetchReplies(msg.id);
   };
 
-  const addReaction = (msgKey: string, emoji: string) => {
-    setReactions(prev => {
-      const existing = prev[msgKey] ?? [];
-      const idx = existing.findIndex(r => r.emoji === emoji);
-      if (idx >= 0) {
-        const updated = [...existing];
-        updated[idx] = { ...updated[idx], count: updated[idx].count + 1 };
-        return { ...prev, [msgKey]: updated };
-      }
-      return { ...prev, [msgKey]: [...existing, { emoji, count: 1 }] };
-    });
+  const addReaction = async (msgKey: string, emoji: string) => {
+    if (!session?.user?.id) return;
+    const myId = session.user.id;
+    const existing = reactions[msgKey] ?? [];
+    const rxEntry = existing.find(r => r.emoji === emoji);
+    const alreadyReacted = rxEntry?.byMe ?? false;
+
+    if (alreadyReacted) {
+      // Optimistic remove
+      setReactions(prev => {
+        const list = (prev[msgKey] ?? [])
+          .map(r => r.emoji === emoji ? { ...r, count: r.count - 1, byMe: false } : r)
+          .filter(r => r.count > 0);
+        return { ...prev, [msgKey]: list };
+      });
+      await supabase.from('message_reactions')
+        .delete()
+        .eq('message_id', msgKey)
+        .eq('user_id', myId)
+        .eq('emoji', emoji);
+    } else {
+      // Optimistic add
+      setReactions(prev => {
+        const list = prev[msgKey] ?? [];
+        const idx = list.findIndex(r => r.emoji === emoji);
+        if (idx >= 0) {
+          const updated = [...list];
+          updated[idx] = { ...updated[idx], count: updated[idx].count + 1, byMe: true };
+          return { ...prev, [msgKey]: updated };
+        }
+        return { ...prev, [msgKey]: [...list, { emoji, count: 1, byMe: true }] };
+      });
+      await supabase.from('message_reactions').insert({ message_id: msgKey, user_id: myId, emoji });
+    }
     setReactPickerMsgId(null);
     setReactPickerPos(null);
   };
@@ -743,7 +836,7 @@ export function ChatArea({
                     {(reactions[dmKey] ?? []).length > 0 && (
                       <div className="flex flex-wrap gap-1 mt-1">
                         {(reactions[dmKey] ?? []).map(r => (
-                          <button key={r.emoji} onClick={() => addReaction(dmKey, r.emoji)} className="bg-[#f5f0ff] border border-[#d8c9f7] rounded-full px-2 py-0.5 text-[13px] flex items-center gap-1 hover:bg-[#ede8f7] transition-all duration-150">
+                          <button key={r.emoji} onClick={() => addReaction(dmKey, r.emoji)} className={`${r.byMe ? 'bg-[#ede8f7] border-[#4d298c]' : 'bg-[#f5f0ff] border-[#d8c9f7]'} border rounded-full px-2 py-0.5 text-[13px] flex items-center gap-1 hover:bg-[#ede8f7] transition-all duration-150`}>
                             <span>{r.emoji}</span><span className="text-[12px] text-[#4d298c] font-medium">{r.count}</span>
                           </button>
                         ))}
@@ -832,7 +925,7 @@ export function ChatArea({
                     {(reactions[msg.id] ?? []).length > 0 && (
                       <div className="flex flex-wrap gap-1 mt-1">
                         {(reactions[msg.id] ?? []).map(r => (
-                          <button key={r.emoji} onClick={() => addReaction(msg.id, r.emoji)} className="bg-[#f5f0ff] border border-[#d8c9f7] rounded-full px-2 py-0.5 text-[13px] flex items-center gap-1 hover:bg-[#ede8f7] transition-all duration-150">
+                          <button key={r.emoji} onClick={() => addReaction(msg.id, r.emoji)} className={`${r.byMe ? 'bg-[#ede8f7] border-[#4d298c]' : 'bg-[#f5f0ff] border-[#d8c9f7]'} border rounded-full px-2 py-0.5 text-[13px] flex items-center gap-1 hover:bg-[#ede8f7] transition-all duration-150`}>
                             <span>{r.emoji}</span><span className="text-[12px] text-[#4d298c] font-medium">{r.count}</span>
                           </button>
                         ))}
