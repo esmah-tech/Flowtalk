@@ -44,6 +44,15 @@ function fileTypeIcon(name: string): { bg: string; icon: React.ReactNode } {
   return                             { bg: 'bg-[#f5f0ff]', icon: <Paperclip size={18} className="text-[#4d298c]" /> };
 }
 
+function renderMessageContent(content: string): React.ReactNode {
+  const parts = content.split(/(@[A-Za-z0-9]+(?:\s[A-Za-z0-9]+)*)/g);
+  return parts.map((part, i) =>
+    part.startsWith('@') ? (
+      <span key={i} className="text-[#4d298c] font-semibold bg-[#ede8f7] px-1 rounded">{part}</span>
+    ) : part
+  );
+}
+
 type SentMessage =
   | { kind: 'text';  text: string;     time: string }
   | { kind: 'voice'; duration: string; time: string; transcriptOpen: boolean };
@@ -700,7 +709,7 @@ export function ChatArea({
                         <span className="text-[12px] text-gray-400">{formatTime(msg.created_at)}</span>
                       </div>
                     )}
-                    {msg.content && <div className="text-[14px] text-gray-800 leading-relaxed">{msg.content}</div>}
+                    {msg.content && <div className="text-[14px] text-gray-800 leading-relaxed">{renderMessageContent(msg.content)}</div>}
                     {(reactions[dmKey] ?? []).length > 0 && (
                       <div className="flex flex-wrap gap-1 mt-1">
                         {(reactions[dmKey] ?? []).map(r => (
@@ -771,7 +780,7 @@ export function ChatArea({
                         <span className="text-[12px] text-gray-400">{formatTime(msg.created_at)}</span>
                       </div>
                     )}
-                    {msg.content && <div className="text-[14px] text-gray-800 leading-relaxed">{msg.content}</div>}
+                    {msg.content && <div className="text-[14px] text-gray-800 leading-relaxed">{renderMessageContent(msg.content)}</div>}
                     {msg.file_url && msg.file_name && (
                       /\.(jpe?g|png|gif|webp)$/i.test(msg.file_name)
                         ? <img src={msg.file_url} alt={msg.file_name} onClick={() => { setLightboxUrl(msg.file_url); setLightboxName(msg.file_name); }} className="mt-1.5 max-w-[300px] rounded-lg border border-[#E5E7EB] cursor-zoom-in" />
@@ -1080,7 +1089,7 @@ export function ChatArea({
                   </span>
                   <span className="text-[12px] text-gray-500">{formatTime(threadMsg.created_at)}</span>
                 </div>
-                <div className="text-[14px] text-gray-800 leading-relaxed">{threadMsg.content}</div>
+                <div className="text-[14px] text-gray-800 leading-relaxed">{renderMessageContent(threadMsg.content)}</div>
               </div>
             </div>
 
@@ -1116,7 +1125,7 @@ export function ChatArea({
                         <span className="font-semibold text-[14px] text-gray-900">{name || 'User'}</span>
                         <span className="text-[12px] text-gray-500">{formatTime(reply.created_at)}</span>
                       </div>
-                      <div className="text-[14px] text-gray-800 leading-relaxed">{reply.content}</div>
+                      <div className="text-[14px] text-gray-800 leading-relaxed">{renderMessageContent(reply.content)}</div>
                     </div>
                   </div>
                 );
