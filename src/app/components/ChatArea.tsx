@@ -14,6 +14,7 @@ interface ChatAreaProps {
   mutedChannelIds: Set<string>;
   highlightedMessageId: string | null;
   onClearHighlight: () => void;
+  onTaskDetected?: (task: { assigneeName: string; taskTitle: string; detectedAt: Date }) => void;
 }
 
 type DbMessage = {
@@ -70,7 +71,7 @@ type DmMessage = {
 export function ChatArea({
   selectedDM, selectedChannelId,
   onSelectChannel, onChannelsChanged, onToggleMute, mutedChannelIds,
-  highlightedMessageId, onClearHighlight,
+  highlightedMessageId, onClearHighlight, onTaskDetected,
 }: ChatAreaProps) {
   const { session } = useAuth();
   const [isSearchOpen,        setIsSearchOpen]        = useState(false);
