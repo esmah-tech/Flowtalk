@@ -112,9 +112,25 @@ export function RightPanel({ selectedDM, onJumpToMessage, selectedChannelId, las
 interface ChannelTask {
   id: string;
   title: string;
+  due_date: string | null;
   source_sender_name: string | null;
   source_message_time: string | null;
   created_at: string;
+}
+
+function relativeTime(ts: string | null): string {
+  if (!ts) return '';
+  const diff = Date.now() - new Date(ts).getTime();
+  if (isNaN(diff)) return '';
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'Just now';
+  if (mins < 60) return `${mins}min ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days === 1) return 'Yesterday';
+  if (days < 7) return `${days}d ago`;
+  return new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
 function AIAnalyzerTab({ selectedChannelId, lastDetectedTask }: { selectedChannelId: string | null; lastDetectedTask: LastDetectedTask | null }) {
@@ -142,7 +158,7 @@ function AIAnalyzerTab({ selectedChannelId, lastDetectedTask }: { selectedChanne
     }
     supabase
       .from('tasks')
-      .select('id, title, source_sender_name, source_message_time, created_at')
+      .select('id, title, due_date, source_sender_name, source_message_time, created_at')
       .eq('source_channel_id', selectedChannelId)
       .order('created_at', { ascending: false })
       .limit(10)
@@ -204,44 +220,52 @@ function AIAnalyzerTab({ selectedChannelId, lastDetectedTask }: { selectedChanne
 
       {/* Detected Tasks */}
       {displayTasks.length > 0 ? (
-        <div className="space-y-2">
-          {displayTasks.map(task => (
-            <div key={task.id} className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
-              <div className="flex items-start gap-3">
-                <div className="w-8 h-8 rounded bg-gradient-to-br from-[#4d298c] to-purple-400 flex items-center justify-center flex-shrink-0">
-                  <Sparkles size={16} className="text-white" />
-                </div>
-                <div className="flex-1">
-                  <div className="text-[14px] text-gray-900 leading-relaxed">
+        <div className="space-y-1.5">
+          {displayTasks.map(task => {
+            const ts = task.source_message_time ?? task.created_at;
+            return (
+              <div key={task.id} className="flex items-start gap-2.5 px-3 py-2.5 rounded-lg hover:bg-[#f9f8fc] transition-all duration-150 border border-transparent hover:border-[#e8e0f7]">
+                <span className="text-[#4d298c] text-[15px] leading-none mt-0.5 flex-shrink-0 select-none">✦</span>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[13px] text-gray-900 leading-snug">
                     {task.source_sender_name && (
-                      <>
-                        <span className="font-semibold text-[#4d298c]">@{task.source_sender_name}</span>
-                        {' has been assigned: '}
-                      </>
+                      <span className="font-semibold text-[#4d298c]">{task.source_sender_name}</span>
                     )}
+                    {task.source_sender_name && <span className="text-gray-500"> assigned </span>}
                     <span className="font-medium">{task.title}</span>
-                    {' — added to task board'}
                   </div>
-                  <div className="text-[12px] text-gray-500 mt-2">
-                    {formatSourceTime(task.source_message_time ?? task.created_at)}
+                  <div className="flex items-center gap-2 mt-1 flex-wrap">
+                    {task.due_date && (
+                      <span className="inline-flex items-center gap-1 text-[11px] text-[#4d298c] bg-[#ede8f7] px-1.5 py-0.5 rounded">
+                        <Calendar size={10} />
+                        {formatDueDate(task.due_date)}
+                      </span>
+                    )}
+                    <span className="text-[11px] text-gray-400">{relativeTime(ts)}</span>
                   </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       ) : (
-        <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
-          <div className="flex items-start gap-3">
-            <div className="w-8 h-8 rounded bg-gradient-to-br from-[#4d298c] to-purple-400 flex items-center justify-center flex-shrink-0 opacity-40">
-              <Sparkles size={16} className="text-white" />
-            </div>
-            <div className="flex-1">
-              <div className="text-[14px] text-gray-500 leading-relaxed">No tasks detected in this channel yet.</div>
-            </div>
-          </div>
+        <div className="flex items-center gap-2.5 px-3 py-4 rounded-lg bg-[#f9f8fc] border border-[#e8e0f7]">
+          <span className="text-[#4d298c] text-[15px] leading-none opacity-50 select-none">✦</span>
+          <p className="text-[13px] text-gray-500 leading-relaxed">
+            AI is watching. Tasks via @mentions appear here.
+          </p>
         </div>
       )}
+
+      {/* Footer: last analyzed */}
+      {displayTasks.length > 0 && (() => {
+        const ts = displayTasks[0].source_message_time ?? displayTasks[0].created_at;
+        return (
+          <div className="mt-3 text-[11px] text-gray-400 text-right">
+            Last analyzed: {relativeTime(ts)}
+          </div>
+        );
+      })()}
 
       {/* Info text */}
       <div className="mt-4 p-3 bg-[#ede8f7] rounded-lg border border-[#d4c6f0]">
