@@ -15,6 +15,7 @@ interface ChatAreaProps {
   highlightedMessageId: string | null;
   onClearHighlight: () => void;
   onTaskDetected?: (task: { assigneeName: string; taskTitle: string; detectedAt: Date }) => void;
+  onSelectDM?: (dm: DMProfile) => void;
 }
 
 type DbMessage = {
@@ -45,13 +46,129 @@ function fileTypeIcon(name: string): { bg: string; icon: React.ReactNode } {
   return                             { bg: 'bg-[#f5f0ff]', icon: <Paperclip size={18} className="text-[#4d298c]" /> };
 }
 
-function renderMessageContent(content: string, members: { id: string; full_name: string | null }[]): React.ReactNode {
+type FullMember = { id: string; full_name: string | null; avatar_url: string | null; role: string; email?: string | null };
+
+function getInitials(name: string) {
+  const parts = name.trim().split(/\s+/);
+  return parts.length >= 2
+    ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+    : name.slice(0, 2).toUpperCase();
+}
+
+function MentionChip({ userId, members, onStartDM }: {
+  userId: string;
+  members: FullMember[];
+  onStartDM?: (m: FullMember) => void;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const hoverTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const member = members.find(m => m.id === userId);
+  const name = member?.full_name ?? userId;
+  const initials = getInitials(name);
+
+  const enterHover = () => {
+    if (hoverTimeout.current) clearTimeout(hoverTimeout.current);
+    setHovered(true);
+  };
+  const leaveHover = () => {
+    hoverTimeout.current = setTimeout(() => setHovered(false), 120);
+  };
+
+  return (
+    <span className="relative inline-flex" style={{ verticalAlign: 'middle' }}>
+      {/* Pill chip */}
+      <span
+        onMouseEnter={enterHover}
+        onMouseLeave={leaveHover}
+        className="inline-flex items-center gap-1 cursor-pointer select-none"
+        style={{
+          padding: '1px 8px 1px 4px',
+          borderRadius: 999,
+          background: 'rgba(77,41,140,0.12)',
+          color: '#7c5cbf',
+          border: '1px solid rgba(77,41,140,0.25)',
+          fontSize: 13,
+          fontWeight: 500,
+          lineHeight: '20px',
+        }}
+      >
+        <span
+          className="flex-shrink-0 rounded-full bg-[#4d298c] flex items-center justify-center overflow-hidden"
+          style={{ width: 16, height: 16 }}
+        >
+          {member?.avatar_url
+            ? <img src={member.avatar_url} alt="" style={{ width: 16, height: 16, objectFit: 'cover' }} />
+            : <span style={{ fontSize: 8, color: 'white', fontWeight: 700, lineHeight: 1 }}>{initials}</span>
+          }
+        </span>
+        @{name}
+      </span>
+
+      {/* Profile card */}
+      {hovered && (
+        <span
+          onMouseEnter={enterHover}
+          onMouseLeave={leaveHover}
+          className="absolute z-50 bg-white border border-[#E5E7EB] rounded-lg shadow-lg flex flex-col gap-2.5"
+          style={{
+            bottom: 'calc(100% + 8px)',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            width: 200,
+            padding: 12,
+          }}
+        >
+          {/* Avatar + name + role */}
+          <span className="flex items-center gap-2">
+            <span className="w-9 h-9 rounded-full bg-[#4d298c] flex items-center justify-center flex-shrink-0 overflow-hidden">
+              {member?.avatar_url
+                ? <img src={member.avatar_url} alt="" style={{ width: 36, height: 36, objectFit: 'cover' }} />
+                : <span className="text-white text-[13px] font-bold">{initials}</span>
+              }
+            </span>
+            <span className="min-w-0">
+              <span className="block text-[13px] font-semibold text-gray-900 truncate">{name}</span>
+              {member?.role && (
+                <span className={`inline-block text-[11px] font-semibold px-1.5 py-0.5 rounded-full mt-0.5 ${member.role === 'admin' ? 'bg-[#ede8f7] text-[#4d298c]' : 'bg-gray-100 text-gray-500'}`}>
+                  {member.role}
+                </span>
+              )}
+            </span>
+          </span>
+          {/* Online indicator */}
+          <span className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-green-500 flex-shrink-0" />
+            <span className="text-[12px] text-gray-500">Online</span>
+          </span>
+          {/* Email */}
+          {member?.email && (
+            <span className="text-[12px] text-gray-500 truncate block">{member.email}</span>
+          )}
+          {/* Send DM */}
+          {onStartDM && member && (
+            <button
+              onClick={() => onStartDM(member)}
+              className="w-full py-1.5 rounded-lg text-[12px] font-semibold text-white bg-green-500 hover:bg-green-600 transition-colors"
+            >
+              Send DM
+            </button>
+          )}
+        </span>
+      )}
+    </span>
+  );
+}
+
+function renderMessageContent(
+  content: string,
+  members: FullMember[],
+  onStartDM?: (m: FullMember) => void,
+): React.ReactNode {
   const parts = content.split(/(<@[a-zA-Z0-9\-]+>)/g);
   return parts.map((part, i) => {
     const match = part.match(/^<@([a-zA-Z0-9\-]+)>$/);
     if (match) {
-      const member = members.find(m => m.id === match[1]);
-      return <span key={i} className="text-[#4d298c] font-semibold">@{member?.full_name ?? match[1]}</span>;
+      return <MentionChip key={i} userId={match[1]} members={members} onStartDM={onStartDM} />;
     }
     return part;
   });
@@ -95,7 +212,7 @@ type DmMessage = {
 export function ChatArea({
   selectedDM, selectedChannelId,
   onSelectChannel, onChannelsChanged, onToggleMute, mutedChannelIds,
-  highlightedMessageId, onClearHighlight, onTaskDetected,
+  highlightedMessageId, onClearHighlight, onTaskDetected, onSelectDM,
 }: ChatAreaProps) {
   const { session } = useAuth();
   const [isSearchOpen,        setIsSearchOpen]        = useState(false);
@@ -124,7 +241,7 @@ export function ChatArea({
   const [lightboxUrl,         setLightboxUrl]         = useState<string | null>(null);
   const [lightboxName,        setLightboxName]        = useState<string | null>(null);
   const [membersOpen,         setMembersOpen]         = useState(false);
-  const [members,             setMembers]             = useState<{ id: string; full_name: string | null; avatar_url: string | null; role: string }[]>([]);
+  const [members,             setMembers]             = useState<FullMember[]>([]);
   const [copyLinkDone,        setCopyLinkDone]        = useState(false);
   const editableRef = React.useRef<HTMLDivElement>(null);
   const threadInputRef = React.useRef<HTMLTextAreaElement>(null);
@@ -630,10 +747,10 @@ export function ChatArea({
   const fetchMembers = useCallback(async () => {
     const { data: wm } = await supabase.from('workspace_members').select('user_id, role');
     if (!wm?.length) { setMembers([]); return; }
-    const { data: profiles } = await supabase.from('profiles').select('id, full_name, avatar_url').in('id', wm.map(m => m.user_id));
-    const map: Record<string, { full_name: string | null; avatar_url: string | null }> = {};
-    for (const p of (profiles ?? [])) map[p.id] = { full_name: p.full_name, avatar_url: p.avatar_url };
-    setMembers(wm.map(m => ({ id: m.user_id, full_name: map[m.user_id]?.full_name ?? null, avatar_url: map[m.user_id]?.avatar_url ?? null, role: m.role })));
+    const { data: profiles } = await supabase.from('profiles').select('id, full_name, avatar_url, email').in('id', wm.map(m => m.user_id));
+    const map: Record<string, { full_name: string | null; avatar_url: string | null; email?: string | null }> = {};
+    for (const p of (profiles ?? [])) map[p.id] = { full_name: p.full_name, avatar_url: p.avatar_url, email: p.email };
+    setMembers(wm.map(m => ({ id: m.user_id, full_name: map[m.user_id]?.full_name ?? null, avatar_url: map[m.user_id]?.avatar_url ?? null, role: m.role, email: map[m.user_id]?.email ?? null })));
   }, []);
 
   useEffect(() => { fetchMembers(); }, [fetchMembers]);
@@ -673,6 +790,11 @@ export function ChatArea({
     setThreadMsg(msg);
     setThreadReplyInput('');
     fetchReplies(msg.id);
+  };
+
+  const handleStartDM = (m: FullMember) => {
+    if (!onSelectDM) return;
+    onSelectDM({ userId: m.id, fullName: m.full_name ?? 'Unknown', avatarUrl: m.avatar_url, online: false });
   };
 
   const addReaction = async (msgKey: string, emoji: string) => {
@@ -891,7 +1013,7 @@ export function ChatArea({
                         <span className="text-[12px] text-gray-400">{formatTime(msg.created_at)}</span>
                       </div>
                     )}
-                    {msg.content && <div className="text-[14px] text-gray-800 leading-relaxed">{renderMessageContent(msg.content, members)}</div>}
+                    {msg.content && <div className="text-[14px] text-gray-800 leading-relaxed">{renderMessageContent(msg.content, members, handleStartDM)}</div>}
                     {(reactions[dmKey] ?? []).length > 0 && (
                       <div className="flex flex-wrap gap-1 mt-1">
                         {(reactions[dmKey] ?? []).map(r => (
@@ -962,7 +1084,7 @@ export function ChatArea({
                         <span className="text-[12px] text-gray-400">{formatTime(msg.created_at)}</span>
                       </div>
                     )}
-                    {msg.content && <div className="text-[14px] text-gray-800 leading-relaxed">{renderMessageContent(msg.content, members)}</div>}
+                    {msg.content && <div className="text-[14px] text-gray-800 leading-relaxed">{renderMessageContent(msg.content, members, handleStartDM)}</div>}
                     {msg.file_url && msg.file_name && (
                       /\.(jpe?g|png|gif|webp)$/i.test(msg.file_name)
                         ? <img src={msg.file_url} alt={msg.file_name} onClick={() => { setLightboxUrl(msg.file_url); setLightboxName(msg.file_name); }} className="mt-1.5 max-w-[300px] rounded-lg border border-[#E5E7EB] cursor-zoom-in" />
@@ -1298,7 +1420,7 @@ export function ChatArea({
                   </span>
                   <span className="text-[12px] text-gray-500">{formatTime(threadMsg.created_at)}</span>
                 </div>
-                <div className="text-[14px] text-gray-800 leading-relaxed">{renderMessageContent(threadMsg.content, members)}</div>
+                <div className="text-[14px] text-gray-800 leading-relaxed">{renderMessageContent(threadMsg.content, members, handleStartDM)}</div>
               </div>
             </div>
 
@@ -1334,7 +1456,7 @@ export function ChatArea({
                         <span className="font-semibold text-[14px] text-gray-900">{name || 'User'}</span>
                         <span className="text-[12px] text-gray-500">{formatTime(reply.created_at)}</span>
                       </div>
-                      <div className="text-[14px] text-gray-800 leading-relaxed">{renderMessageContent(reply.content, members)}</div>
+                      <div className="text-[14px] text-gray-800 leading-relaxed">{renderMessageContent(reply.content, members, handleStartDM)}</div>
                     </div>
                   </div>
                 );

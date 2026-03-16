@@ -62,6 +62,7 @@ export default function App() {
         highlightedMessageId={highlightedMessageId}
         onClearHighlight={() => setHighlightedMessageId(null)}
         onTaskDetected={setLastDetectedTask}
+        onSelectDM={setSelectedDM}
       />
       <RightPanel selectedDM={selectedDM} onJumpToMessage={handleJumpToMessage} selectedChannelId={selectedChannelId} lastDetectedTask={lastDetectedTask} />
     </div>
