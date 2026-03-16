@@ -61,13 +61,19 @@ function MentionChip({ userId, members, onStartDM }: {
   onStartDM?: (m: FullMember) => void;
 }) {
   const [hovered, setHovered] = useState(false);
+  const [showBelow, setShowBelow] = useState(false);
   const hoverTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const chipRef = useRef<HTMLSpanElement>(null);
   const member = members.find(m => m.id === userId);
   const name = member?.full_name ?? userId;
   const initials = getInitials(name);
 
   const enterHover = () => {
     if (hoverTimeout.current) clearTimeout(hoverTimeout.current);
+    if (chipRef.current) {
+      const rect = chipRef.current.getBoundingClientRect();
+      setShowBelow(rect.top < 220);
+    }
     setHovered(true);
   };
   const leaveHover = () => {
@@ -75,7 +81,7 @@ function MentionChip({ userId, members, onStartDM }: {
   };
 
   return (
-    <span className="relative inline-flex" style={{ verticalAlign: 'middle' }}>
+    <span ref={chipRef} className="relative inline-flex" style={{ verticalAlign: 'middle' }}>
       {/* Pill chip */}
       <span
         onMouseEnter={enterHover}
@@ -105,13 +111,13 @@ function MentionChip({ userId, members, onStartDM }: {
       </span>
 
       {/* Profile card */}
-      {hovered && (
+      {hovered && member?.full_name && (
         <span
           onMouseEnter={enterHover}
           onMouseLeave={leaveHover}
           className="absolute z-50 bg-white border border-[#E5E7EB] rounded-lg shadow-lg flex flex-col gap-2.5"
           style={{
-            bottom: 'calc(100% + 8px)',
+            ...(showBelow ? { top: 'calc(100% + 8px)' } : { bottom: 'calc(100% + 8px)' }),
             left: '50%',
             transform: 'translateX(-50%)',
             width: 200,
@@ -119,45 +125,45 @@ function MentionChip({ userId, members, onStartDM }: {
           }}
         >
           {/* Avatar + name + role */}
-          <span className="flex items-center gap-2">
-            <span className="w-9 h-9 rounded-full bg-[#4d298c] flex items-center justify-center flex-shrink-0 overflow-hidden">
-              {member?.avatar_url
+          <span className="flex items-center gap-2.5">
+            <span className="w-9 h-9 rounded-full bg-gradient-to-br from-[#4d298c] to-purple-400 flex items-center justify-center flex-shrink-0 overflow-hidden">
+              {member.avatar_url
                 ? <img src={member.avatar_url} alt="" style={{ width: 36, height: 36, objectFit: 'cover' }} />
                 : <span className="text-white text-[13px] font-bold">{initials}</span>
               }
             </span>
             <span className="min-w-0">
-              <span className="block text-[13px] font-semibold text-gray-900 truncate">{name}</span>
-              {member?.role && (
-                <span className={`inline-block text-[11px] font-semibold px-1.5 py-0.5 rounded-full mt-0.5 ${member.role === 'admin' ? 'bg-[#ede8f7] text-[#4d298c]' : 'bg-gray-100 text-gray-500'}`}>
-                  {member.role}
-                </span>
-              )}
+              <span className="block text-[13px] font-semibold text-gray-900 truncate">{member.full_name}</span>
+              {member.role && <span className="block text-[11px] text-gray-500 mt-0.5">{member.role}</span>}
             </span>
           </span>
-          {/* Online indicator */}
-          <span className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-green-500 flex-shrink-0" />
-            <span className="text-[12px] text-gray-500">Online</span>
-          </span>
+          {/* Divider */}
+          <span className="block border-t border-[#E5E7EB]" />
           {/* Email */}
-          {member?.email && (
-            <span className="text-[12px] text-gray-500 truncate block">{member.email}</span>
-          )}
-          {/* Send DM */}
-          {onStartDM && member && (
-            <button
-              onClick={() => onStartDM(member)}
-              className="w-full py-1.5 rounded-lg text-[12px] font-semibold text-white bg-green-500 hover:bg-green-600 transition-colors"
-            >
-              Send DM
-            </button>
-          )}
+          {member.email && <span className="text-[11px] text-gray-500 truncate block">{member.email}</span>}
+          {/* Bottom row: online + DM */}
+          <span className="flex items-center justify-between">
+            <span className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-green-500 flex-shrink-0" />
+              <span className="text-[12px] text-gray-500">Online</span>
+            </span>
+            {onStartDM && (
+              <button
+                onClick={(e) => { e.stopPropagation(); onStartDM(member); }}
+                className="w-[26px] h-[26px] rounded-full flex items-center justify-center flex-shrink-0"
+                style={{ background: '#d7f78b' }}
+                title="Send DM"
+              >
+                <MessageSquare size={13} color="#2d5a1b" />
+              </button>
+            )}
+          </span>
         </span>
       )}
     </span>
   );
 }
+
 
 function renderMessageContent(
   content: string,
@@ -243,6 +249,8 @@ export function ChatArea({
   const [membersOpen,         setMembersOpen]         = useState(false);
   const [members,             setMembers]             = useState<FullMember[]>([]);
   const [copyLinkDone,        setCopyLinkDone]        = useState(false);
+  const [hoveredSenderId,     setHoveredSenderId]     = useState<string | null>(null);
+  const [senderCardRect,      setSenderCardRect]      = useState<{ top: number; bottom: number; left: number } | null>(null);
   const editableRef = React.useRef<HTMLDivElement>(null);
   const threadInputRef = React.useRef<HTMLTextAreaElement>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -250,6 +258,7 @@ export function ChatArea({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const msgRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const dbMsgIdsRef = useRef<Set<string>>(new Set());
+  const senderHoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!highlightedMessageId) return;
@@ -797,6 +806,20 @@ export function ChatArea({
     onSelectDM({ userId: m.id, fullName: m.full_name ?? 'Unknown', avatarUrl: m.avatar_url, online: false });
   };
 
+  const enterSenderHover = (e: React.MouseEvent, userId: string) => {
+    if (userId === session?.user?.id) return;
+    if (senderHoverTimer.current) clearTimeout(senderHoverTimer.current);
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setSenderCardRect({ top: rect.top, bottom: rect.bottom, left: rect.left });
+    setHoveredSenderId(userId);
+  };
+  const leaveSenderHover = () => {
+    senderHoverTimer.current = setTimeout(() => {
+      setHoveredSenderId(null);
+      setSenderCardRect(null);
+    }, 120);
+  };
+
   const addReaction = async (msgKey: string, emoji: string) => {
     if (!session?.user?.id) return;
     const myId = session.user.id;
@@ -1071,16 +1094,27 @@ export function ChatArea({
                   {isGrouped ? (
                     <div className="w-8 flex-shrink-0" />
                   ) : (
-                    p?.avatar_url
-                      ? <img src={p.avatar_url} alt={name} className="w-8 h-8 rounded-full object-cover flex-shrink-0 mt-0.5" />
-                      : <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#4d298c] to-purple-400 flex items-center justify-center flex-shrink-0 mt-0.5">
-                          <span className="text-white text-[11px] font-bold">{initials}</span>
-                        </div>
+                    <div
+                      className="flex-shrink-0 mt-0.5"
+                      onMouseEnter={msg.user_id !== session?.user?.id ? (e) => enterSenderHover(e, msg.user_id) : undefined}
+                      onMouseLeave={msg.user_id !== session?.user?.id ? leaveSenderHover : undefined}
+                    >
+                      {p?.avatar_url
+                        ? <img src={p.avatar_url} alt={name} className="w-8 h-8 rounded-full object-cover block" />
+                        : <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#4d298c] to-purple-400 flex items-center justify-center">
+                            <span className="text-white text-[11px] font-bold">{initials}</span>
+                          </div>
+                      }
+                    </div>
                   )}
                   <div className="flex-1 min-w-0">
                     {!isGrouped && (
                       <div className="flex items-baseline gap-2 mb-0.5">
-                        <span className="font-semibold text-[14px] text-gray-900">{name || 'User'}</span>
+                        <span
+                          className={`font-semibold text-[14px] text-gray-900${msg.user_id !== session?.user?.id ? ' cursor-pointer' : ''}`}
+                          onMouseEnter={msg.user_id !== session?.user?.id ? (e) => enterSenderHover(e, msg.user_id) : undefined}
+                          onMouseLeave={msg.user_id !== session?.user?.id ? leaveSenderHover : undefined}
+                        >{name || 'User'}</span>
                         <span className="text-[12px] text-gray-400">{formatTime(msg.created_at)}</span>
                       </div>
                     )}
@@ -1554,6 +1588,63 @@ export function ChatArea({
           </div>
         </>
       )}
+
+      {/* Sender hover profile card */}
+      {hoveredSenderId && senderCardRect && (() => {
+        const m = members.find(mem => mem.id === hoveredSenderId);
+        if (!m?.full_name) return null;
+        const cardName = m.full_name;
+        const cardInitials = getInitials(cardName);
+        const showBelow = senderCardRect.top < 220;
+        return (
+          <div
+            onMouseEnter={() => { if (senderHoverTimer.current) clearTimeout(senderHoverTimer.current); }}
+            onMouseLeave={leaveSenderHover}
+            className="fixed z-[200] bg-white border border-[#E5E7EB] rounded-lg shadow-lg flex flex-col gap-2.5"
+            style={{
+              ...(showBelow
+                ? { top: senderCardRect.bottom + 8 }
+                : { bottom: window.innerHeight - senderCardRect.top + 8 }),
+              left: senderCardRect.left,
+              width: 200,
+              padding: 12,
+            }}
+          >
+            {/* Avatar + name + role */}
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-full bg-gradient-to-br from-[#4d298c] to-purple-400 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                {m.avatar_url
+                  ? <img src={m.avatar_url} alt="" style={{ width: 36, height: 36, objectFit: 'cover' }} />
+                  : <span className="text-white text-[13px] font-bold">{cardInitials}</span>
+                }
+              </div>
+              <div className="min-w-0">
+                <div className="text-[13px] font-semibold text-gray-900 truncate">{cardName}</div>
+                {m.role && <div className="text-[11px] text-gray-500 mt-0.5">{m.role}</div>}
+              </div>
+            </div>
+            {/* Divider */}
+            <div className="border-t border-[#E5E7EB]" />
+            {/* Email */}
+            {m.email && <div className="text-[11px] text-gray-500 truncate">{m.email}</div>}
+            {/* Bottom row: online + DM */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-green-500 flex-shrink-0" />
+                <span className="text-[12px] text-gray-500">Online</span>
+              </div>
+              <button
+                onClick={(e) => { e.stopPropagation(); handleStartDM(m); setHoveredSenderId(null); setSenderCardRect(null); }}
+                className="w-[26px] h-[26px] rounded-full flex items-center justify-center flex-shrink-0"
+                style={{ background: '#d7f78b' }}
+                title="Send DM"
+              >
+                <MessageSquare size={13} color="#2d5a1b" />
+              </button>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Lightbox */}
       {lightboxUrl && (
