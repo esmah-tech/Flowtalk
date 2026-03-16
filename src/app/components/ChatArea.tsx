@@ -57,6 +57,27 @@ function renderMessageContent(content: string, members: { id: string; full_name:
   });
 }
 
+// Read contenteditable div DOM back to raw messageInput format (<@userId> tokens)
+function readEditable(el: HTMLDivElement): string {
+  let result = '';
+  for (const node of Array.from(el.childNodes)) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      result += node.textContent ?? '';
+    } else if (node instanceof HTMLElement) {
+      if (node.dataset.uid) {
+        result += `<@${node.dataset.uid}>`;
+      } else if (node.tagName === 'BR') {
+        result += '\n';
+      } else if (node.tagName === 'DIV') {
+        result += '\n' + readEditable(node as HTMLDivElement);
+      } else {
+        result += readEditable(node as HTMLDivElement);
+      }
+    }
+  }
+  return result;
+}
+
 type SentMessage =
   | { kind: 'text';  text: string;     time: string }
   | { kind: 'voice'; duration: string; time: string; transcriptOpen: boolean };
@@ -105,7 +126,7 @@ export function ChatArea({
   const [membersOpen,         setMembersOpen]         = useState(false);
   const [members,             setMembers]             = useState<{ id: string; full_name: string | null; avatar_url: string | null; role: string }[]>([]);
   const [copyLinkDone,        setCopyLinkDone]        = useState(false);
-  const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+  const editableRef = React.useRef<HTMLDivElement>(null);
   const threadInputRef = React.useRef<HTMLTextAreaElement>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const reactBtnRefs = React.useRef<Record<string, HTMLButtonElement | null>>({});
@@ -197,11 +218,10 @@ export function ChatArea({
     setDbMessages([]);
     setSentMessages([]);
     setAttachedFile(null);
-    setMessageInput('');
+    clearInput();
     setReactions({});
     setEmojiPickerOpen(false);
     setMentionDropdownOpen(false);
-    if (textareaRef.current) textareaRef.current.style.height = 'auto';
     fetchMessages();
 
     if (!selectedChannelId) return;
@@ -286,11 +306,10 @@ export function ChatArea({
   // DM loading + realtime
   useEffect(() => {
     setDmMessages([]);
-    setMessageInput('');
+    clearInput();
     setAttachedFile(null);
     setEmojiPickerOpen(false);
     setMentionDropdownOpen(false);
-    if (textareaRef.current) textareaRef.current.style.height = 'auto';
 
     if (!selectedDM || !session?.user) return;
 
@@ -363,9 +382,8 @@ export function ChatArea({
     if (selectedDM) {
       if (!session) return;
       const text = messageInput.trim();
-      setMessageInput('');
+      clearInput();
       setAttachedFile(null);
-      if (textareaRef.current) textareaRef.current.style.height = 'auto';
       const { data } = await supabase.from('direct_messages').insert({
         sender_id: session.user.id,
         receiver_id: selectedDM.userId,
@@ -386,9 +404,8 @@ export function ChatArea({
     if (!selectedChannelId || !session) return;
 
     const text = messageInput.trim();
-    setMessageInput('');
+    clearInput();
     setAttachedFile(null);
-    if (textareaRef.current) textareaRef.current.style.height = 'auto';
 
     let file_url: string | null = null;
     let file_name: string | null = null;
@@ -513,26 +530,55 @@ export function ChatArea({
   };
 
   const handleEmojiClick = (emoji: string) => {
-    setMessageInput(v => v + emoji);
+    insertAtCursor(emoji);
     setEmojiPickerOpen(false);
-    textareaRef.current?.focus();
+    editableRef.current?.focus();
   };
 
   const handleAtSign = () => {
-    setMessageInput(v => v + '@');
+    insertAtCursor('@');
     setMentionDropdownOpen(true);
-    textareaRef.current?.focus();
+    editableRef.current?.focus();
   };
 
   const handleMentionSelect = (member: { id: string; full_name: string | null }) => {
-    setMessageInput(v => {
-      const atIdx = v.lastIndexOf('@');
-      const base = atIdx >= 0 ? v.slice(0, atIdx) : v;
-      return base + `<@${member.id}> `;
-    });
+    const el = editableRef.current;
+    if (!el) return;
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0) {
+      const range = sel.getRangeAt(0);
+      const container = range.startContainer;
+      const offset = range.startOffset;
+      if (container.nodeType === Node.TEXT_NODE) {
+        const beforeCursor = (container.textContent ?? '').slice(0, offset);
+        const atIdx = beforeCursor.lastIndexOf('@');
+        if (atIdx >= 0) {
+          const deleteRange = document.createRange();
+          deleteRange.setStart(container, atIdx);
+          deleteRange.setEnd(container, offset);
+          deleteRange.deleteContents();
+          // Build chip span
+          const chip = document.createElement('span');
+          chip.contentEditable = 'false';
+          chip.dataset.uid = member.id;
+          chip.textContent = `@${member.full_name ?? member.id}`;
+          chip.className = 'inline-block bg-[#ede8f7] text-[#4d298c] rounded-full px-2 py-0.5 text-[13px] font-medium mx-0.5 align-middle';
+          const space = document.createTextNode('\u00A0');
+          deleteRange.insertNode(space);
+          deleteRange.insertNode(chip);
+          // Move cursor after the space
+          const after = document.createRange();
+          after.setStartAfter(space);
+          after.setEndAfter(space);
+          sel.removeAllRanges();
+          sel.addRange(after);
+        }
+      }
+    }
+    setMessageInput(readEditable(el));
     setMentionDropdownOpen(false);
     setMentionFilter('');
-    textareaRef.current?.focus();
+    el.focus();
   };
 
   const handleRenameChannel = async () => {
@@ -591,6 +637,31 @@ export function ChatArea({
   }, []);
 
   useEffect(() => { fetchMembers(); }, [fetchMembers]);
+
+  const clearInput = useCallback(() => {
+    setMessageInput('');
+    if (editableRef.current) editableRef.current.innerHTML = '';
+  }, []);
+
+  const insertAtCursor = useCallback((text: string) => {
+    const el = editableRef.current;
+    if (!el) return;
+    el.focus();
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0) {
+      const range = sel.getRangeAt(0);
+      range.deleteContents();
+      const node = document.createTextNode(text);
+      range.insertNode(node);
+      range.setStartAfter(node);
+      range.setEndAfter(node);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    } else {
+      el.appendChild(document.createTextNode(text));
+    }
+    setMessageInput(readEditable(el));
+  }, []);
 
   const handlePinMessage = async (msgId: string, pin: boolean) => {
     await supabase.from('messages').update({ is_pinned: pin }).eq('id', msgId);
@@ -832,7 +903,7 @@ export function ChatArea({
                     )}
                   </div>
                   <div className={`toolbar absolute right-2 -top-4 transition-all duration-150 bg-white border border-[#E5E7EB] rounded-lg shadow-sm flex items-center gap-1 p-1 z-20 ${moreMenuMsgId === dmKey || reactPickerMsgId === dmKey ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
-                    <button title="Reply" onClick={() => { setMessageInput(`@${name} `); textareaRef.current?.focus(); }} className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><MessageSquare size={15} /></button>
+                    <button title="Reply" onClick={() => { const el = editableRef.current; if (el) { el.textContent = `@${name} `; const r = document.createRange(); r.selectNodeContents(el); r.collapse(false); const s = window.getSelection(); s?.removeAllRanges(); s?.addRange(r); setMessageInput(`@${name} `); el.focus(); } }} className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><MessageSquare size={15} /></button>
                     <button ref={el => { reactBtnRefs.current[dmKey] = el; }} title="React" onClick={() => { if (reactPickerMsgId === dmKey) { setReactPickerMsgId(null); setReactPickerPos(null); } else { const rect = reactBtnRefs.current[dmKey]?.getBoundingClientRect(); setReactPickerPos(rect ? { top: rect.top - 48, left: rect.left } : null); setReactPickerMsgId(dmKey); } }} className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><SmilePlus size={15} /></button>
                     <div className="relative">
                       <button title="More" onClick={() => setMoreMenuMsgId(moreMenuMsgId === dmKey ? null : dmKey)} className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><MoreHorizontal size={15} /></button>
@@ -921,7 +992,7 @@ export function ChatArea({
                     )}
                   </div>
                   <div className={`toolbar absolute right-2 -top-4 transition-all duration-150 bg-white border border-[#E5E7EB] rounded-lg shadow-sm flex items-center gap-1 p-1 z-20 ${moreMenuMsgId === msg.id || reactPickerMsgId === msg.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
-                    <button title="Reply" onClick={() => { setMessageInput(`@${name || 'User'} `); textareaRef.current?.focus(); }} className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><MessageSquare size={15} /></button>
+                    <button title="Reply" onClick={() => { const el = editableRef.current; if (el) { el.textContent = `@${name || 'User'} `; const r = document.createRange(); r.selectNodeContents(el); r.collapse(false); const s = window.getSelection(); s?.removeAllRanges(); s?.addRange(r); setMessageInput(`@${name || 'User'} `); el.focus(); } }} className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><MessageSquare size={15} /></button>
                     <button ref={el => { reactBtnRefs.current[msg.id] = el; }} title="React" onClick={() => { if (reactPickerMsgId === msg.id) { setReactPickerMsgId(null); setReactPickerPos(null); } else { const rect = reactBtnRefs.current[msg.id]?.getBoundingClientRect(); setReactPickerPos(rect ? { top: rect.top - 48, left: rect.left } : null); setReactPickerMsgId(msg.id); } }} className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><SmilePlus size={15} /></button>
                     <div className="relative">
                       <button title="More" onClick={() => setMoreMenuMsgId(moreMenuMsgId === msg.id ? null : msg.id)} className="text-gray-400 hover:text-[#4d298c] hover:bg-[#f5f0ff] rounded px-1.5 py-1 transition-all duration-150"><MoreHorizontal size={15} /></button>
@@ -1000,27 +1071,44 @@ export function ChatArea({
               </button>
             </div>
           )}
-          <textarea
-            ref={textareaRef}
-            placeholder={selectedDM ? `Message ${selectedDM.name}...` : 'Type a message...'}
-            value={messageInput}
-            onChange={(e) => {
-              const val = e.target.value;
-              setMessageInput(val);
-              e.target.style.height = 'auto';
-              e.target.style.height = `${e.target.scrollHeight}px`;
-              const cursor = e.target.selectionStart ?? val.length;
-              const lastWord = val.slice(0, cursor).split(/\s/).pop() ?? '';
-              if (lastWord.startsWith('@')) {
-                setMentionFilter(lastWord.slice(1));
-                setMentionDropdownOpen(true);
-              } else {
-                setMentionDropdownOpen(false);
-                setMentionFilter('');
+          <div
+            ref={editableRef}
+            contentEditable
+            suppressContentEditableWarning
+            data-placeholder={selectedDM ? `Message ${selectedDM.name}...` : 'Type a message...'}
+            onInput={() => {
+              const el = editableRef.current;
+              if (!el) return;
+              const raw = readEditable(el);
+              setMessageInput(raw);
+              const sel = window.getSelection();
+              if (sel && sel.rangeCount > 0) {
+                const range = sel.getRangeAt(0);
+                const container = range.startContainer;
+                const offset = range.startOffset;
+                if (container.nodeType === Node.TEXT_NODE) {
+                  const textBefore = (container.textContent ?? '').slice(0, offset);
+                  const lastWord = textBefore.split(/\s/).pop() ?? '';
+                  if (lastWord.startsWith('@')) {
+                    setMentionFilter(lastWord.slice(1));
+                    setMentionDropdownOpen(true);
+                  } else {
+                    setMentionDropdownOpen(false);
+                    setMentionFilter('');
+                  }
+                } else {
+                  setMentionDropdownOpen(false);
+                  setMentionFilter('');
+                }
               }
             }}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-            className="w-full px-4 py-3 text-[14px] resize-none outline-none rounded-t-lg min-h-[72px]"
+            onPaste={(e) => {
+              e.preventDefault();
+              const text = e.clipboardData.getData('text/plain');
+              document.execCommand('insertText', false, text);
+            }}
+            className="w-full px-4 py-3 text-[14px] outline-none rounded-t-lg min-h-[72px] max-h-40 overflow-y-auto break-words empty:before:content-[attr(data-placeholder)] empty:before:text-gray-400 empty:before:pointer-events-none"
           />
 
           {isRecording ? (
@@ -1090,7 +1178,7 @@ export function ChatArea({
 
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => { setMessageInput(''); if (textareaRef.current) textareaRef.current.style.height = 'auto'; }}
+                  onClick={() => clearInput()}
                   className="px-3 py-1.5 text-[13px] font-medium text-gray-700 hover:bg-gray-100 rounded"
                 >
                   Discard
