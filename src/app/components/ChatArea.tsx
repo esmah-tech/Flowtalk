@@ -433,13 +433,10 @@ export function ChatArea({
     }
 
     // Background Gemini task detection — never blocks message send
-    console.log('[Gemini] Trigger check: text has mention=', /<@[a-zA-Z0-9\-]+>/.test(text), '| insertedMsg=', insertedMsg?.id ?? null);
     if (/<@[a-zA-Z0-9\-]+>/.test(text) && insertedMsg) {
       const { data: channelRow } = await supabase.from('channels').select('ai_enabled').eq('id', selectedChannelId).single();
-      console.log('[Gemini] ai_enabled check: channelRow=', channelRow, '| will run=', channelRow?.ai_enabled !== false);
       if (channelRow?.ai_enabled !== false) {
       const geminiKey = import.meta.env.VITE_GEMINI_API_KEY;
-      console.log('[Gemini] API key present=', !!geminiKey);
       const msgId = insertedMsg.id;
       const msgTime = insertedMsg.created_at;
       const senderName = members.find(m => m.id === session.user.id)?.full_name ?? null;
@@ -448,7 +445,6 @@ export function ChatArea({
       const capturedMembers = [...members];
       const capturedUserId = session.user.id;
       const sourceFiles = file_url && file_name ? [{ url: file_url, name: file_name }] : null;
-      console.log('[Gemini] Members count=', capturedMembers.length, '| members=', capturedMembers.map(m => m.full_name));
 
       (async () => {
         try {
@@ -457,32 +453,26 @@ export function ChatArea({
             return m?.full_name ? `@${m.full_name}` : `@${uid}`;
           });
           const prompt = `Does this message assign a task? Message: ${geminiText}\nReply only JSON: {hasTask:true,taskTitle:'max 8 words',assigneeName:'name after @',dueDate:'date or null'} or {hasTask:false}`;
-          console.log('[Gemini] Sending prompt:', prompt);
           const res = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`,
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${geminiKey}`,
             {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+              body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }],
+                generationConfig: { responseMimeType: "application/json" }  }),
             }
           );
-          console.log('[Gemini] API response status=', res.status, res.statusText);
           const data = await res.json();
-          console.log('[Gemini] API response data=', JSON.stringify(data).slice(0, 500));
           const raw: string = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-          console.log('[Gemini] Raw text=', raw);
           const jsonMatch = raw.match(/\{[\s\S]*\}/);
-          if (!jsonMatch) { console.log('[Gemini] No JSON found in response, skipping'); return; }
+          if (!jsonMatch) return;
           const parsed = JSON.parse(jsonMatch[0]);
-          console.log('[Gemini] Parsed result=', parsed);
-          if (!parsed.hasTask) { console.log('[Gemini] hasTask=false, no task to create'); return; }
-          console.log('[Gemini] Looking for assignee name=', parsed.assigneeName, '| among members=', capturedMembers.map(m => m.full_name));
+          if (!parsed.hasTask) return;
           const assignee = capturedMembers.find(
             m => m.full_name?.toLowerCase() === (parsed.assigneeName ?? '').toLowerCase()
           );
-          console.log('[Gemini] Assignee match=', assignee ?? 'NOT FOUND', '| sender id=', capturedUserId);
-          if (!assignee) { console.log('[Gemini] No assignee match, skipping'); return; }
-          if (assignee.id === capturedUserId) { console.log('[Gemini] Assignee is the sender, skipping self-assignment'); return; }
+          if (!assignee) return;
+          if (assignee.id === capturedUserId) return;
           const insertPayload = {
             title: parsed.taskTitle,
             assigned_to: assignee.id,
@@ -497,14 +487,12 @@ export function ChatArea({
             source_sender_name: senderName,
             source_files: sourceFiles,
           };
-          console.log('[Gemini] Inserting task:', insertPayload);
           const { data: insertData, error: insertError } = await supabase.from('tasks').insert(insertPayload).select().single();
-          console.log('[Gemini] Task insert result: data=', insertData, '| error=', insertError);
           if (!insertError && insertData) {
             onTaskDetected?.({ assigneeName: parsed.assigneeName, taskTitle: parsed.taskTitle, detectedAt: new Date() });
           }
-        } catch (e) {
-          console.error('[Gemini] Error during task detection:', e);
+        } catch (_e) {
+          // silent — task detection is best-effort
         }
       })();
       } // end ai_enabled check
