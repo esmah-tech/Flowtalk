@@ -109,8 +109,17 @@ export function RightPanel({ selectedDM, onJumpToMessage, selectedChannelId, las
   );
 }
 
+interface ChannelTask {
+  id: string;
+  title: string;
+  source_sender_name: string | null;
+  source_message_time: string | null;
+  created_at: string;
+}
+
 function AIAnalyzerTab({ selectedChannelId, lastDetectedTask }: { selectedChannelId: string | null; lastDetectedTask: LastDetectedTask | null }) {
   const [aiOn, setAiOn] = useState(true);
+  const [channelTasks, setChannelTasks] = useState<ChannelTask[]>([]);
 
   // Fetch ai_enabled from Supabase on mount / channel change
   useEffect(() => {
@@ -124,6 +133,39 @@ function AIAnalyzerTab({ selectedChannelId, lastDetectedTask }: { selectedChanne
         if (data && typeof data.ai_enabled === 'boolean') setAiOn(data.ai_enabled);
       });
   }, [selectedChannelId]);
+
+  // Fetch tasks for this channel from DB
+  useEffect(() => {
+    if (!selectedChannelId) {
+      setChannelTasks([]);
+      return;
+    }
+    supabase
+      .from('tasks')
+      .select('id, title, source_sender_name, source_message_time, created_at')
+      .eq('source_channel_id', selectedChannelId)
+      .order('created_at', { ascending: false })
+      .limit(10)
+      .then(({ data }) => {
+        if (data) setChannelTasks(data as ChannelTask[]);
+      });
+  }, [selectedChannelId]);
+
+  // Prepend lastDetectedTask if it's not already in channelTasks
+  const displayTasks = lastDetectedTask
+    ? channelTasks.some(t => t.title === lastDetectedTask.taskTitle)
+      ? channelTasks
+      : [
+          {
+            id: '__session__',
+            title: lastDetectedTask.taskTitle,
+            source_sender_name: lastDetectedTask.assigneeName,
+            source_message_time: null,
+            created_at: lastDetectedTask.detectedAt.toISOString(),
+          } as ChannelTask,
+          ...channelTasks,
+        ]
+    : channelTasks;
 
   const handleToggle = async () => {
     const next = !aiOn;
@@ -160,23 +202,33 @@ function AIAnalyzerTab({ selectedChannelId, lastDetectedTask }: { selectedChanne
         </button>
       </div>
 
-      {/* Detected Task */}
-      {lastDetectedTask ? (
-        <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
-          <div className="flex items-start gap-3">
-            <div className="w-8 h-8 rounded bg-gradient-to-br from-[#4d298c] to-purple-400 flex items-center justify-center flex-shrink-0">
-              <Sparkles size={16} className="text-white" />
-            </div>
-            <div className="flex-1">
-              <div className="text-[14px] text-gray-900 leading-relaxed">
-                <span className="font-semibold text-[#4d298c]">@{lastDetectedTask.assigneeName}</span> has been assigned:{' '}
-                <span className="font-medium">{lastDetectedTask.taskTitle}</span> — added to task board
+      {/* Detected Tasks */}
+      {displayTasks.length > 0 ? (
+        <div className="space-y-2">
+          {displayTasks.map(task => (
+            <div key={task.id} className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded bg-gradient-to-br from-[#4d298c] to-purple-400 flex items-center justify-center flex-shrink-0">
+                  <Sparkles size={16} className="text-white" />
+                </div>
+                <div className="flex-1">
+                  <div className="text-[14px] text-gray-900 leading-relaxed">
+                    {task.source_sender_name && (
+                      <>
+                        <span className="font-semibold text-[#4d298c]">@{task.source_sender_name}</span>
+                        {' has been assigned: '}
+                      </>
+                    )}
+                    <span className="font-medium">{task.title}</span>
+                    {' — added to task board'}
+                  </div>
+                  <div className="text-[12px] text-gray-500 mt-2">
+                    {formatSourceTime(task.source_message_time ?? task.created_at)}
+                  </div>
+                </div>
               </div>
-              <div className="text-[12px] text-gray-500 mt-2">
-                Detected at {lastDetectedTask.detectedAt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
-              </div>
             </div>
-          </div>
+          ))}
         </div>
       ) : (
         <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
@@ -185,7 +237,7 @@ function AIAnalyzerTab({ selectedChannelId, lastDetectedTask }: { selectedChanne
               <Sparkles size={16} className="text-white" />
             </div>
             <div className="flex-1">
-              <div className="text-[14px] text-gray-500 leading-relaxed">No tasks detected yet in this session.</div>
+              <div className="text-[14px] text-gray-500 leading-relaxed">No tasks detected in this channel yet.</div>
             </div>
           </div>
         </div>
